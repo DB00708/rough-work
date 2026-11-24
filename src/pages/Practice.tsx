@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+// firebase first: it initializes the app before config, explain and data use it.
+import { ensureSignedIn, isFirebaseConfigured } from '../firebase';
 import { DEFAULT_CONFIG, loadConfig } from '../config';
-import { ensureSignedIn } from '../firebase';
 import { isOnDeviceAvailable } from '../read';
 import { usePipeline } from '../pipeline';
-import { createLineDetector, FrameGuide, useCamera, type LineDetector } from '../components/captureAdapter';
+import {
+  CaptureDebug,
+  createLineDetector,
+  FrameGuide,
+  useCamera,
+  usePersistentRoi,
+} from '../components/captureAdapter';
 import { realDeps } from '../components/deps';
 import { DEMO_LINES, DEMO_PROBLEM } from '../components/demoLines';
 import { LineItem } from '../components/LineItem';
 import { TopBar } from '../components/TopBar';
 
-/** How often a video frame goes to the line detector (pixel diff is cheap). */
-const FRAME_TICK_MS = 500;
 const DEMO_STEP_MS = 900;
+const HINT_MS = 3500;
 
 type Boot = 'loading' | 'ready';
 
@@ -20,14 +26,20 @@ function isTypingTarget(t: EventTarget | null): boolean {
   return t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(t.tagName);
 }
 
+/** `?debug` in the URL shows the detector's ink mask (for tuning). */
+const SHOW_DEBUG = typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug');
+
 export default function Practice() {
   const { pipeline, state } = usePipeline(realDeps);
-  const camera = useCamera();
+  const cam = useCamera({ autoStart: false });
+  const { roi, committedRoi, setRoi, commitRoi } = usePersistentRoi();
+  const [detector] = useState(() => createLineDetector({ roi: committedRoi }));
   const [boot, setBoot] = useState<Boot>('loading');
   const [signedIn, setSignedIn] = useState(false);
   const [problem, setProblem] = useState('');
   const [demoRunning, setDemoRunning] = useState(false);
-  const detectorRef = useRef<LineDetector | null>(null);
+  const [wantCamera, setWantCamera] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
   const listEndRef = useRef<HTMLLIElement>(null);
   const unmounted = useRef(false);
 
@@ -42,7 +54,9 @@ export default function Practice() {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const cfg = await loadConfig().catch(() => DEFAULT_CONFIG);
+      // No .env.local (demo / offline): skip Remote Config so no request goes
+      // out with the placeholder key.
+      const cfg = isFirebaseConfigured() ? await loadConfig().catch(() => DEFAULT_CONFIG) : DEFAULT_CONFIG;
       const uid = await ensureSignedIn().catch((e) => {
         console.warn('[practice] sign-in failed, running without an account', e);
         return null;
@@ -62,25 +76,40 @@ export default function Practice() {
     pipeline.setProblemText(problem);
   }, [pipeline, problem]);
 
-  // Line detector: one per page; crops go straight into the pipeline queue.
-  if (!detectorRef.current) {
-    detectorRef.current = createLineDetector({ onLine: (e) => pipeline.addCrop(e.cropDataUrl) });
-  }
+  // Capture -> pipeline. An "amends" crop extends the last line.
+  useEffect(
+    () =>
+      detector.onLine((l) => {
+        if (l.amends) pipeline.amendLast(l.cropDataUrl);
+        else pipeline.addCrop(l.cropDataUrl);
+      }),
+    [detector, pipeline],
+  );
 
-  // Feed frames while the camera is live.
+  // Guide box moved: the detector resets its baseline.
   useEffect(() => {
-    if (camera.status !== 'live') return;
-    const id = window.setInterval(() => {
-      const v = camera.videoRef.current;
-      if (v && v.readyState >= 2) detectorRef.current?.onFrame(v);
-    }, FRAME_TICK_MS);
-    return () => window.clearInterval(id);
-  }, [camera.status, camera.videoRef]);
+    detector.setRoi(committedRoi);
+  }, [detector, committedRoi]);
 
-  // Spacebar = "line done".
+  // Sample frames while the camera is live. stop() is required on unmount.
+  useEffect(() => {
+    const v = cam.videoRef.current;
+    if (cam.ready && v) detector.start(v);
+    return () => detector.stop();
+  }, [cam.ready, cam.videoRef, detector]);
+
+  useEffect(() => {
+    if (!hint) return;
+    const id = window.setTimeout(() => setHint(null), HINT_MS);
+    return () => window.clearTimeout(id);
+  }, [hint]);
+
+  // Spacebar = "line done". The line arrives through onLine above.
   const lineDone = useCallback(() => {
-    if (camera.status === 'live') detectorRef.current?.forceLineDone();
-  }, [camera.status]);
+    if (!cam.ready) return;
+    const line = detector.forceLineDone(cam.videoRef.current ?? undefined);
+    if (!line) setHint('No new writing found in the box. Move your hand out of the box and try again.');
+  }, [cam.ready, cam.videoRef, detector]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -98,6 +127,16 @@ export default function Practice() {
     if (lineCount) listEndRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [lineCount]);
 
+  const startCamera = () => {
+    setWantCamera(true);
+    cam.start();
+  };
+
+  const stopCamera = () => {
+    setWantCamera(false);
+    cam.stop();
+  };
+
   const runDemo = useCallback(async () => {
     if (demoRunning) return;
     setDemoRunning(true);
@@ -113,8 +152,11 @@ export default function Practice() {
 
   const newProblem = () => {
     pipeline.reset();
+    detector.reset(); // new page: forget known ink
     setProblem('');
   };
+
+  const starting = wantCamera && !cam.ready && !cam.error;
 
   return (
     <div className="practice">
@@ -122,40 +164,68 @@ export default function Practice() {
 
       <main className="practice-main">
         <section className="pane pane-camera" aria-label="Camera">
-          <div className="video-wrap">
-            <video ref={camera.videoRef} className="video" playsInline muted aria-label="Live view of your paper" />
-            {camera.status === 'live' && <FrameGuide />}
-            {camera.status !== 'live' && (
+          <div className={`video-wrap${cam.ready ? '' : ' video-wrap-idle'}`}>
+            {/* Always rendered so the stream can attach; FrameGuide maps to its exact box. */}
+            <div className="video-frame">
+              <video ref={cam.videoRef} className="video" playsInline muted aria-label="Live view of your paper" />
+              {cam.ready && (
+                <FrameGuide
+                  roi={roi}
+                  onChange={setRoi}
+                  onChangeEnd={commitRoi}
+                  hideLabel={state.lines.length > 0}
+                  label="Frame your page (drag to fit)"
+                />
+              )}
+            </div>
+            {!cam.ready && (
               <div className="video-empty">
                 <p>Point the camera down at your paper. Frames stay on this device.</p>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => void camera.start()}
-                  disabled={camera.status === 'starting'}
-                >
-                  {camera.status === 'starting' ? 'Starting…' : 'Start camera'}
+                <button type="button" className="btn btn-primary" onClick={startCamera} disabled={starting}>
+                  {starting ? 'Starting…' : cam.error ? 'Try again' : 'Start camera'}
                 </button>
-                {camera.error && <p className="error">{camera.error}</p>}
+                {cam.error && <p className="error">{cam.error.message}</p>}
               </div>
             )}
           </div>
           <div className="camera-actions">
-            <button type="button" className="btn" onClick={lineDone} disabled={camera.status !== 'live'}>
+            <button type="button" className="btn" onClick={lineDone} disabled={!cam.ready}>
               Line done <kbd>Space</kbd>
             </button>
-            {camera.status === 'live' && (
-              <button type="button" className="btn btn-quiet" onClick={camera.stop}>
+            {cam.ready && (
+              <button type="button" className="btn btn-quiet" onClick={stopCamera}>
                 Stop camera
               </button>
+            )}
+            {cam.devices.length > 1 && (
+              <select
+                className="select"
+                aria-label="Camera"
+                value={cam.deviceId ?? ''}
+                onChange={(e) => cam.selectDevice(e.target.value || null)}
+              >
+                <option value="">Default camera</option>
+                {cam.devices.map((d, i) => (
+                  <option key={d.deviceId || i} value={d.deviceId}>
+                    {d.label || `Camera ${i + 1}`}
+                  </option>
+                ))}
+              </select>
             )}
             <button type="button" className="btn btn-quiet" onClick={() => void runDemo()} disabled={demoRunning || boot !== 'ready'}>
               {demoRunning ? 'Demo running…' : 'Demo mode'}
             </button>
           </div>
+          {hint && (
+            <p className="notice" role="status">
+              {hint}
+            </p>
+          )}
           <p className="muted small">
-            Write one line, then press <kbd>Space</kbd>. Click any line on the right to fix what was read.
+            Fit the box to your page. New lines are picked up when you pause; press <kbd>Space</kbd> to send one now.
+            Click any line on the right to fix what was read.
           </p>
+          {SHOW_DEBUG && <CaptureDebug detector={detector} />}
         </section>
 
         <section className="pane pane-lines" aria-label="Your lines">

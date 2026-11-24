@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { COUNTS_DEBOUNCE_MS, Pipeline, findPrevAnchor, hybridRatio, type PipelineDeps } from './pipeline';
+import { COUNTS_DEBOUNCE_MS, LOCAL_QUOTA_ID, Pipeline, findPrevAnchor, hybridRatio, type PipelineDeps } from './pipeline';
 import type { AppConfig, Explanation, Line, LineRead, StepCheck } from './types';
 
 const cfg: AppConfig = {
@@ -471,6 +471,77 @@ describe('reset and stop', () => {
     p.init({ cfg, uid: 'u', cloudMode: false });
     await p.whenIdle();
     expect(p.getState().lines[0].status).toBe('ok');
+  });
+});
+
+describe('Capture amends', () => {
+  it('amendLast replaces the last crop line and reads it again', async () => {
+    const { deps } = makeDeps({ a: [r('x=2')], b: [r('2*x')], b2: [r('2*x=4')] });
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    await run(p, ['a', 'b']);
+    const id = p.getState().lines[1].id;
+    expect(p.amendLast('b2')).toBe(id);
+    await p.whenIdle();
+    const s = p.getState();
+    expect(s.lines).toHaveLength(2);
+    expect(s.lines[1].cropDataUrl).toBe('b2');
+    expect(s.lines[1].read?.plain).toBe('2*x=4');
+  });
+
+  it('an amend during an in-flight read drops the old result', async () => {
+    let releaseOld!: (v: LineRead) => void;
+    const { deps } = makeDeps(
+      {},
+      {
+        readLine: vi.fn((crop: string) =>
+          crop === 'old' ? new Promise<LineRead>((res) => (releaseOld = res)) : Promise.resolve(r('x=9')),
+        ),
+      },
+    );
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    p.addCrop('old');
+    await Promise.resolve();
+    p.amendLast('new');
+    releaseOld(r('x=1'));
+    await p.whenIdle();
+    const s = p.getState();
+    expect(s.lines).toHaveLength(1);
+    expect(s.lines[0].read?.plain).toBe('x=9');
+    expect(s.lines[0].status).toBe('ok');
+  });
+
+  it('amendLast with no crop line adds a new line', async () => {
+    const { deps } = makeDeps({ c: [r('x=1')] });
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: null, cloudMode: false });
+    p.addDemoLine('x=1');
+    p.amendLast('c');
+    await p.whenIdle();
+    expect(p.getState().lines).toHaveLength(2);
+  });
+});
+
+describe('Quota without an account', () => {
+  it('still applies the daily cap under a local key', async () => {
+    const { deps, calls } = makeDeps(
+      { a: [r('x=2')], b: [r('x=3')] },
+      { canCallCloud: vi.fn(async () => false) },
+    );
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: null, cloudMode: false });
+    await run(p, ['a', 'b']);
+    expect(deps.canCallCloud).toHaveBeenCalledWith(LOCAL_QUOTA_ID, cfg);
+    expect(calls.explain).toBe(0);
+  });
+
+  it('records cloud calls under the local key', async () => {
+    const { deps } = makeDeps({ 'crop:y=1': [r('y=7', 'device', 0.3)] });
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: null, cloudMode: false });
+    await run(p, ['crop:y=1']);
+    expect(deps.recordCloudCall).toHaveBeenCalledWith(LOCAL_QUOTA_ID);
   });
 });
 

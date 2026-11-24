@@ -77,6 +77,8 @@ interface CountsSnapshot {
 }
 
 export const COUNTS_DEBOUNCE_MS = 2000;
+/** Quota key used when there is no signed-in user. */
+export const LOCAL_QUOTA_ID = 'local';
 
 let idSeq = 0;
 const newId = () => `l${Date.now().toString(36)}_${(idSeq++).toString(36)}`;
@@ -171,6 +173,29 @@ export class Pipeline {
     this.scheduleCounts();
     this.enqueue({ kind: 'crop', id: line.id });
     return line.id;
+  }
+
+  /**
+   * The capture module saw the student keep writing on the last line
+   * (CapturedLine.amends). Replace that line's crop and read it again.
+   * Falls back to a new line when there is no crop line to amend.
+   */
+  amendLast(cropDataUrl: string): string {
+    const last = this.state.lines[this.state.lines.length - 1];
+    if (!last || !last.cropDataUrl || this.demo.has(last.id)) return this.addCrop(cropDataUrl);
+    this.confirmed.delete(last.id);
+    this.updateLine(last.id, {
+      cropDataUrl,
+      read: undefined,
+      editedByUser: false,
+      status: 'checking',
+      check: undefined,
+      explanation: undefined,
+    });
+    if (!this.queue.some((j) => j.kind === 'crop' && j.id === last.id)) {
+      this.enqueue({ kind: 'crop', id: last.id });
+    }
+    return last.id;
   }
 
   /**
@@ -381,12 +406,19 @@ export class Pipeline {
     if (read.source === 'cloud') this.recordCloud();
   }
 
+  /**
+   * Key for the daily cloud cap. Without an account the cap still applies,
+   * under a local key, so a failed sign-in cannot lift it.
+   */
+  private quotaId(): string {
+    return this.setup?.uid ?? LOCAL_QUOTA_ID;
+  }
+
   /** Quota is real usage, so it is recorded even for a stale job. */
   private recordCloud(): void {
-    const uid = this.setup?.uid;
-    if (!uid) return;
+    if (!this.setup) return;
     try {
-      void Promise.resolve(this.deps.recordCloudCall(uid)).catch(() => {});
+      void Promise.resolve(this.deps.recordCloudCall(this.quotaId())).catch(() => {});
     } catch {
       /* ignore */
     }
@@ -403,10 +435,9 @@ export class Pipeline {
   }
 
   private async allowCloud(): Promise<boolean> {
-    const { uid, cfg } = this.setup!;
-    if (!uid) return true; // no account: nothing to meter
+    const { cfg } = this.setup!;
     try {
-      const ok = await this.deps.canCallCloud(uid, cfg);
+      const ok = await this.deps.canCallCloud(this.quotaId(), cfg);
       if (!ok && !this.stale()) this.patch({ notice: 'Daily cloud limit reached. Fix lines by hand.' });
       return ok;
     } catch {
@@ -455,8 +486,11 @@ export class Pipeline {
       if (this.stale()) return 'stale';
     }
 
-    // The student may have fixed the line while we were reading.
-    if (this.find(id)?.editedByUser) return 'edited';
+    // The student may have fixed the line while we were reading, or the
+    // capture module may have amended its crop (a crop job is then queued).
+    const now = this.find(id);
+    if (now?.editedByUser) return 'edited';
+    if (now && now.cropDataUrl !== line.cropDataUrl) return 'stale';
     this.setLine(id, { read });
     return 'read';
   }
