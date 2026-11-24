@@ -18,9 +18,15 @@
 //      (a hand outline has long vertical edges; characters are short);
 //    - the band reaches the bottom edge of the ROI (arms enter from below);
 //    - known ink is covered: more than maxInkLossFraction of it is missing.
-//    Obstructions are not emitted and block forceLineDone(). If one stays for
-//    `rebaselineSamples` stable samples, it is absorbed into the known ink
-//    (an object left on the page).
+//    Obstructions are not emitted and block forceLineDone() (except
+//    'bottom-edge': a forced line may sit at the bottom of the box). If one
+//    stays for `rebaselineSamples` stable samples, it is absorbed into the
+//    known ink (an object left on the page). 'covered' is never absorbed; if
+//    it lasts `coveredRebaselineSamples` stable samples (far longer than a
+//    resting hand) the ink really is gone (erased, page turned): known ink is
+//    REPLACED by the current mask and detection resumes.
+//    Keep a margin in the guide box below the last line: new ink touching the
+//    bottom edge is treated as an arm and only emitted via forceLineDone().
 // 5. New ink on the same rows as the last line, and starting to the right of
 //    it, is a continuation (the student paused mid-line): `amends: true`, and
 //    the band covers both.
@@ -68,6 +74,8 @@ export interface CoreOptions {
   bottomEdgeRows: number;
   /** Stable samples of persistent obstruction before it is absorbed into known ink. */
   rebaselineSamples: number;
+  /** Stable samples of 'covered' before known ink is replaced by the current mask. */
+  coveredRebaselineSamples: number;
   /** Fraction of known ink that may be hidden before the scene counts as covered. */
   maxInkLossFraction: number;
   /** Padding added above and below the band, as a fraction of its height. */
@@ -96,6 +104,7 @@ export function defaultCoreOptions(width: number, height: number): CoreOptions {
     maxComponentFraction: 0.18,
     bottomEdgeRows: 2,
     rebaselineSamples: 12,
+    coveredRebaselineSamples: 40,
     maxInkLossFraction: 0.15,
     padFraction: 0.3,
     minPadRows: 3,
@@ -119,7 +128,7 @@ export type LineEvent = {
   forced: boolean;
 };
 
-export type CoreEvent = { type: 'baseline' } | { type: 'rebaseline'; reason: 'obstruction' } | LineEvent;
+export type CoreEvent = { type: 'baseline' } | { type: 'rebaseline'; reason: 'obstruction' | 'ink-gone' } | LineEvent;
 
 export interface CoreState {
   status: CoreStatus;
@@ -139,7 +148,8 @@ export interface DetectorCore {
   push(mask: Mask): CoreEvent | null;
   /**
    * Emit the new ink in the last mask now, ignoring stability. Returns null
-   * when there is no new ink or the scene is obstructed (hand in frame).
+   * when there is no new ink or the scene is obstructed (hand in frame),
+   * except 'bottom-edge', which force() allows.
    * Before any baseline, all ink in the mask counts as new.
    */
   force(): LineEvent | null;
@@ -168,6 +178,7 @@ export function createDetectorCore(partial: Partial<CoreOptions> & { width: numb
   let stillCount = 0;
   let lastChange = 1;
   let obstructedCount = 0;
+  let coveredCount = 0;
   let status: CoreStatus = 'warming';
   let obstruction: ObstructionReason | null = null;
   let lastLine: (Band & { x0: number; x1: number }) | null = null;
@@ -177,6 +188,14 @@ export function createDetectorCore(partial: Partial<CoreOptions> & { width: numb
     knownDil = dilate(known, w, h, o.shiftTolerance);
     knownInk = countInk(known);
     obstructedCount = 0;
+  }
+
+  /** Known ink becomes exactly `mask` (it may shrink). */
+  function replaceKnown(mask: Mask) {
+    known = null;
+    addKnown(mask);
+    coveredCount = 0;
+    lastLine = null;
   }
 
   function covered(mask: Mask): boolean {
@@ -272,6 +291,7 @@ export function createDetectorCore(partial: Partial<CoreOptions> & { width: numb
       const c = candidate(mask);
       if (!c) {
         obstructedCount = 0;
+        coveredCount = 0;
         status = 'idle';
         obstruction = null;
         return null;
@@ -280,6 +300,15 @@ export function createDetectorCore(partial: Partial<CoreOptions> & { width: numb
         obstructedCount++;
         status = 'obstructed';
         obstruction = c.obstruction;
+        coveredCount = c.obstruction === 'covered' ? coveredCount + 1 : 0;
+        if (coveredCount >= o.coveredRebaselineSamples) {
+          // Ink has been missing for far longer than a resting hand: it was
+          // erased or the page changed. Start over from what is there now.
+          replaceKnown(mask);
+          status = 'idle';
+          obstruction = null;
+          return { type: 'rebaseline', reason: 'ink-gone' };
+        }
         // Absorb a persistent object, but never because known ink is merely
         // covered: absorbing that would add the hand, not the page.
         if (obstructedCount >= o.rebaselineSamples && c.obstruction !== 'covered') {
@@ -297,7 +326,7 @@ export function createDetectorCore(partial: Partial<CoreOptions> & { width: numb
     force() {
       if (!prev) return null;
       const c = candidate(prev);
-      if (!c || c.obstruction) {
+      if (!c || (c.obstruction && c.obstruction !== 'bottom-edge')) {
         if (c?.obstruction) {
           status = 'obstructed';
           obstruction = c.obstruction;
@@ -315,6 +344,7 @@ export function createDetectorCore(partial: Partial<CoreOptions> & { width: numb
       stillCount = 0;
       lastChange = 1;
       obstructedCount = 0;
+      coveredCount = 0;
       status = 'warming';
       obstruction = null;
       lastLine = null;

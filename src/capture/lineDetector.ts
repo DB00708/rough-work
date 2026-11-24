@@ -89,8 +89,9 @@ export interface LineDetector {
   onFrame(video: HTMLVideoElement): CapturedLine | null;
   /**
    * Spacebar fallback: crop the ink added since the last emit, now.
-   * Returns null when there is no new ink or a hand/arm is in the guide box
-   * (see getDebug().obstruction). Before the first baseline, all ink counts as new.
+   * Returns null when there is no new ink or a hand is in the guide box
+   * (see getDebug().obstruction; ink at the bottom edge is allowed). Before the
+   * first baseline, all ink counts as new.
    */
   forceLineDone(video?: HTMLVideoElement): CapturedLine | null;
   /** Subscribe to finished lines. Returns an unsubscribe function. */

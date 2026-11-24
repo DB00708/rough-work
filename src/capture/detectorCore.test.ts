@@ -176,12 +176,34 @@ describe('detectorCore', () => {
     expect(core.force()).toMatchObject({ type: 'line', forced: true, rawBand: { y0: 10, y1: 14 } });
   });
 
-  it('erasing ink does not emit, and the erased ink stays known until reset()', () => {
+  it('erasing ink does not emit, and reads as covered before the covered limit', () => {
     const core = createDetectorCore({ width: W, height: H });
     feed(core, write(empty(), 10, 30, 10, 90), 4);
     expect(feed(core, empty(), 20)).toEqual([]);
     expect(core.state().status).toBe('obstructed');
     expect(core.state().obstruction).toBe('covered');
+  });
+
+  it('erased lines: after coveredRebaselineSamples the known ink shrinks and detection resumes', () => {
+    const core = createDetectorCore({ width: W, height: H, coveredRebaselineSamples: 40 });
+    let page = empty();
+    for (const y of [5, 15, 25, 35, 45]) page = write(page, y, y + 4, 10, 80);
+    expect(feed(core, page, 4)).toEqual([{ type: 'baseline' }]);
+    const erased = clearRect(clearRect(page, 15, 19, 0, 99), 35, 39, 0, 99); // 2 of 5 lines gone
+    const events = feed(core, erased, 3 + 40);
+    expect(events).toEqual([{ type: 'rebaseline', reason: 'ink-gone' }]);
+    expect(core.state().status).toBe('idle');
+    // A new line in the erased space is emitted.
+    const [e] = feed(core, write(erased, 15, 19, 10, 60), 4);
+    expect(e).toMatchObject({ type: 'line', amends: false, rawBand: { y0: 15, y1: 19 } });
+  });
+
+  it('force() may emit a line at the bottom edge of the box', () => {
+    const core = primed();
+    const m = write(empty(), 74, 79, 10, 60);
+    expect(feed(core, m, 6)).toEqual([]);
+    expect(core.state().obstruction).toBe('bottom-edge');
+    expect(core.force()).toMatchObject({ type: 'line', forced: true, rawBand: { y0: 74, y1: 79 } });
   });
 
   it('a hand covering existing text, then leaving, never emits the text (MUST 1)', () => {
