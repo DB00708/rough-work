@@ -1,0 +1,55 @@
+{
+  "conditions": [],
+  "parameters": {
+    "frame_interval_ms": {
+      "defaultValue": {
+        "value": "8000"
+      },
+      "description": "Milliseconds between frame checks when Gemini Nano reads on device. Integer, 2000 to 120000.",
+      "valueType": "NUMBER"
+    },
+    "cloud_frame_interval_ms": {
+      "defaultValue": {
+        "value": "20000"
+      },
+      "description": "Milliseconds between frame checks in cloud mode (Nano not available). Integer, 2000 to 600000. Never lower than frame_interval_ms.",
+      "valueType": "NUMBER"
+    },
+    "confidence_threshold": {
+      "defaultValue": {
+        "value": "0.6"
+      },
+      "description": "Re-read a line in the cloud when the on-device read confidence is below this value. 0 to 1.",
+      "valueType": "NUMBER"
+    },
+    "daily_cloud_cap": {
+      "defaultValue": {
+        "value": "50"
+      },
+      "description": "Maximum cloud calls per user per day. Integer, 0 to 10000.",
+      "valueType": "NUMBER"
+    },
+    "read_prompt": {
+      "defaultValue": {
+        "value": "You see a photo of ONE handwritten line of maths from a student's notebook.\nTranscribe that line exactly as written. Do not solve it, correct it or finish it. If the student made a mistake, copy the mistake.\nIf the photo shows more than one line, transcribe only the lowest complete line.\nGive \"latex\" for display, \"plain\" as plain ASCII maths for a computer algebra system, and an honest \"confidence\".\nUse a confidence below 0.6 if any symbol is unclear, crossed out, smudged or cut off at the edge. Do not guess high."
+      },
+      "description": "Base prompt for reading one handwritten line. read.ts appends the JSON format rules.",
+      "valueType": "STRING"
+    },
+    "explain_prompt": {
+      "defaultValue": {
+        "value": "The student is in Class 10-12 or preparing for JEE/NEET in India.\nExplain only the step from LINE A to LINE B. Do not re-solve the full problem.\nKeep it short and kind. Blame the step, not the student."
+      },
+      "description": "Base prompt for explaining a wrong step. explain.ts appends the JSON fields and allowed mistake types.",
+      "valueType": "STRING"
+    },
+    "cloud_model": {
+      "defaultValue": {
+        "value": "gemini-3.5-flash-lite"
+      },
+      "description": "Gemini model name for cloud calls.",
+      "valueType": "STRING"
+    }
+  },
+  "parameterGroups": {}
+}
