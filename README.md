@@ -2,67 +2,96 @@
 
 Rough Work watches you solve maths on paper and flags the first wrong line while you write.
 
-Point a webcam at your notebook. Write your steps as usual. When a line does not follow from the line before it, Rough Work marks it red within about 3 seconds and explains the mistake in Hinglish. You find the sign error on line 3, not 20 minutes later at the answer key.
+Point a webcam at your notebook and write your steps as usual. When a line does not follow from the line before it, Rough Work marks it red. Then it explains the mistake in Hinglish, with three hints. You find the sign error on line 3 when you write it, not 20 minutes later at the answer key.
 
 Built for #BuildHybridAI 2026 with Firebase AI Logic and Gemini Nano in Chrome.
+
+**Live demo:** <https://rough-work-81b7f.web.app> (not deployed yet).
+
+**Judges:** see [docs/TESTING.md](docs/TESTING.md).
 
 ## How it works
 
 The device reads every line. Code judges every line. The cloud speaks only when a line is wrong.
 
-This is the normal mode, with Gemini Nano on the device. Without Nano, the app runs in cloud mode (see the routing rules below).
+This is the normal mode, with Gemini Nano on the device. Without Nano, the app runs in cloud mode (see the routing rules).
 
 ```mermaid
 flowchart LR
-    A[Webcam frame<br/>paper on the desk] --> B[Crop new line<br/>frame diff, JPEG]
-    B --> C[Gemini Nano reads the line<br/>ON DEVICE, every line]
+    A[Webcam frame<br/>stays on device] --> B[Crop new line<br/>frame diff, JPEG]
+    B --> C[Gemini Nano reads the line<br/>ON DEVICE]
     C --> D{Step follows?<br/>nerdamer, in code}
-    D -- yes --> E[Mark line OK<br/>keep watching]
+    D -- yes --> E[Mark line OK]
     E --> A
     D -- no --> F[Gemini explains<br/>CLOUD, wrong lines only]
     F --> G[Log mistake type<br/>Firestore, text only]
-    D -- cannot parse --> H[Mark line 'unsure'<br/>student can fix it]
+    D -- cannot parse --> H[Mark line 'unsure'<br/>student fixes it]
 
     style C fill:#dbeafe,stroke:#2563eb
     style F fill:#ffedd5,stroke:#ea580c
 ```
 
-1. **Capture.** The app compares webcam frames on a canvas. When a new line of writing appears, it crops only that line to a JPEG.
-2. **Read on device.** Gemini Nano reads the crop through Firebase AI Logic (`InferenceMode.PREFER_ON_DEVICE`). It returns JSON: `{latex, plain, confidence}`.
-3. **Check in code.** [nerdamer](https://nerdamer.com/) tests whether the new line is equivalent to the line before it. The verdict is deterministic. The language model only reads handwriting; it does not decide right or wrong.
-4. **Explain in the cloud.** Only when a step is wrong, the cloud Gemini model (`InferenceMode.ONLY_IN_CLOUD`) gets the two lines. It returns a Hinglish explanation, a 3-step hint ladder (nudge, method, answer) and a mistake type.
-5. **Log.** Firestore stores the mistake type as text. The "My mistakes" page shows your repeated mistakes.
+1. **Capture.** The app compares webcam frames on a canvas, inside a guide box that you fit to your page. When you pause after a new line, it crops only that line to a JPEG. Press **Space** to send a line at once.
+2. **Read on device.** Gemini Nano reads the crop and returns JSON: `{latex, plain, confidence}`.
+3. **Check in code.** [nerdamer](https://nerdamer.com/) tests whether the new line is equivalent to the line before it. The language model only reads handwriting. It does not decide right or wrong.
+4. **Explain in the cloud.** Only for a wrong step, the cloud Gemini model gets the two lines (text and crops). It returns a Hinglish explanation, an English version, a hint ladder (nudge, method, answer) and a mistake type.
+5. **Log.** Firestore stores the mistake as text. The **My mistakes** page lists your recent mistakes and the most common mistake types.
 
-Routing rules:
+You can click any line to fix what was read (the fix-it edit). The app checks the line again, and the line after it.
 
-- If Nano is not available, the app reads in the cloud at a slower interval (20 s instead of 8 s) and shows a "cloud mode" badge.
-- If Nano's confidence is below the threshold (default 0.6), the app re-reads that crop once in the cloud.
-- If nerdamer cannot parse a line, the line is marked "unsure" (amber). The app does not call the cloud for parse failures.
-- A daily cap (default 50) limits cloud calls per user.
+## How Firebase AI Logic is used
+
+| File | What it does |
+|---|---|
+| [src/firebase.ts](src/firebase.ts) | Initializes Firebase, App Check (reCAPTCHA Enterprise) and `getAI` with the Gemini Developer API backend. Creates the read model with `InferenceMode.PREFER_ON_DEVICE` and a cloud model with `InferenceMode.ONLY_IN_CLOUD`. |
+| [src/read.ts](src/read.ts) | `readLine()` sends one line crop to the hybrid model with a JSON schema and records where it ran (device or cloud). `readLineInCloud()` re-reads a crop in the cloud. `initDeviceModel()` downloads Nano and reports progress. |
+| [src/explain.ts](src/explain.ts) | `explainMistake()` calls the cloud model (`ONLY_IN_CLOUD`) with both lines and their crops. It returns structured JSON: Hinglish and English text, 3 hints and a mistake type from a fixed list. |
+
+The routing between them is in [src/pipeline.ts](src/pipeline.ts).
+
+## Routing rules
+
+1. Read each line with `PREFER_ON_DEVICE`. If Nano is not available, the app reads in the cloud, waits at least 20 s between cloud reads, and shows a **cloud mode** badge.
+2. If Nano's confidence is below the threshold (default 0.6), re-read that crop once in the cloud.
+3. Before a line turns red, Nano reads the crop a second time. If the two reads disagree, the line is marked **unsure** (amber), not wrong.
+4. If nerdamer cannot parse a line, mark it **unsure**. Do not call the cloud.
+5. A wrong step calls the cloud for the explanation.
+6. A daily cap (default 50) limits cloud calls per user. At the cap, lines that need the cloud become **unsure**, and you can fix them by hand.
 
 ## Why hybrid
 
 | Reason | Detail |
 |---|---|
-| Cost | A 2-hour session has about 900 line reads. On device, they cost nothing. The cloud runs only for the few wrong lines. |
-| Latency | A wrong step is flagged in under 3 seconds with no network round trip. |
-| Privacy | The camera sees a minor's room. Full frames never leave the device. With Nano, a line crop leaves the device only when a step is wrong or a read is unsure. In cloud mode (no Nano), every line crop goes to the cloud. |
-| Bad Wi-Fi | Hostel Wi-Fi drops. With Nano on the device, reading and checking work with Wi-Fi off. Only the explanation needs the network. Without Nano, reading needs the network too. |
+| Cost | A 2-hour session can have hundreds of line reads. On the device, they cost nothing. The cloud runs only for the few wrong lines. |
+| Latency | The wrong-step flag needs no network round trip. |
+| Privacy | The camera sees a minor's room. Full frames never leave the device. With Nano, a line crop leaves the device only for a wrong step or an unsure read. |
+| Bad Wi-Fi | Hostel Wi-Fi drops. With Nano, reading and checking work with Wi-Fi off. Only the explanation needs the network. |
 
-## The hybrid meter
+## Hybrid meter
 
-The practice screen shows a live counter, for example `on-device reads: 47 · cloud calls: 2`. Each line has a badge that shows where it was read: device or cloud. The target is at least 20 device reads for each cloud call.
+The top bar shows `on-device reads: N · cloud calls: M · ratio N:1` for the current problem. Each line has a badge: **device**, **cloud**, or **typed** (demo lines). The goal is at least 20 device reads for each cloud call.
 
 ## Privacy
 
-- No webcam frame is stored. Not on the device, not in the cloud.
-- Line crops stay in memory. A crop goes to the cloud in these cases only:
+- No webcam frame is stored, on the device or in the cloud.
+- Line crops stay in memory. A crop goes to the cloud only in these cases:
   - the step is wrong (for the explanation),
-  - the on-device read has low confidence (one cloud re-read),
-  - the app is in cloud mode because Nano is not available. Then every line crop goes to the cloud for reading. The "cloud mode" badge shows this.
-- Full webcam frames never leave the device.
-- Firestore stores text only: session counts and mistake types with the two transcribed lines.
+  - the device read has low confidence (one cloud re-read),
+  - the app is in cloud mode because Nano is not available. Then every line crop goes to the cloud for reading. The **cloud mode** badge shows this.
+- Firestore stores text only: session counts, and each mistake with its two transcribed lines and the explanation.
 - Sign-in is Anonymous Auth. The app asks for no name, email or phone number.
+
+## Measured numbers
+
+First measurements, Chrome 158, typed-font test images. Real handwriting is not measured yet.
+
+| Measure | Result | Target |
+|---|---|---|
+| Nano read, warm | about 2 s (1.9 to 2.4 s) | under 3 s to flag a wrong step |
+| Nano read, first call (cold) | 19.7 s | one time per page load |
+| Cloud read | 4.3 s | cloud mode only |
+| Cloud explanation | 7.2 s; being optimised | under 5 s |
+| Handwriting accuracy | pending | 14 of 20 neat lines |
 
 ## Tech stack
 
@@ -73,7 +102,7 @@ The practice screen shows a live counter, for example `on-device reads: 47 · cl
 | Maths check | nerdamer (JavaScript computer algebra) |
 | Camera | `getUserMedia`, canvas frame diff, JPEG crop |
 | Backend | Firebase Anonymous Auth, Firestore, Remote Config, App Check (reCAPTCHA Enterprise), Hosting |
-| Voice | Browser `speechSynthesis` |
+| Voice | Browser `speechSynthesis` reads the explanation aloud |
 
 ## Setup
 
@@ -89,31 +118,25 @@ The practice screen shows a live counter, for example `on-device reads: 47 · cl
 1. Open `chrome://flags/#prompt-api-for-gemini-nano-multimodal-input`.
 2. Set the flag to **Enabled**.
 3. Restart Chrome.
+4. Open the `/spike` page and click the download button. Wait for 100%. The download is large and can take a long time.
 
-The first on-device read starts the Nano model download. Open the `/spike` page and click the download button to start it early. The download can take a long time.
+Until the model is downloaded, the practice page runs in cloud mode.
 
 ### 2. Create the Firebase project
 
-Follow [docs/SETUP.md](docs/SETUP.md). It is a click-by-click checklist for the Firebase console.
+Follow [docs/SETUP.md](docs/SETUP.md), a click-by-click checklist for the Firebase console.
 
-### 3. Configure the app
+### 3. Configure and run
 
 ```sh
 npm install
 cp .env.example .env.local
-```
-
-Fill in `.env.local` with the values from your Firebase web app and the reCAPTCHA Enterprise site key. Never commit `.env.local`. It is in `.gitignore`.
-
-Put your Firebase project ID in `.firebaserc`. Replace `rough-work-REPLACE_ME`.
-
-### 4. Run
-
-```sh
 npm run dev
 ```
 
-Open the URL that Vite prints, in Chrome.
+Fill in `.env.local` with the values from your Firebase web app and the reCAPTCHA Enterprise site key. Never commit `.env.local`. It is in `.gitignore`. Put your Firebase project ID in `.firebaserc`.
+
+Without `.env.local`, the app still starts. Demo mode and the step checker work. Reading, explanations and the mistake log need Firebase.
 
 ### App Check debug token (local development)
 
@@ -121,26 +144,24 @@ App Check blocks requests from `localhost` unless you register a debug token.
 
 1. Set `VITE_APPCHECK_DEBUG_TOKEN=true` in `.env.local`.
 2. Run `npm run dev` and open the app. The browser console prints `App Check debug token: <token>`.
-3. In the Firebase console, register this token. See [docs/SETUP.md](docs/SETUP.md), step 8.
-4. Replace `true` with the token in `.env.local`, so the token stays the same across browser profiles.
+3. Register the token in the Firebase console. See [docs/SETUP.md](docs/SETUP.md), step 8.
+4. Replace `true` with the token in `.env.local`.
 
 The debug token is a secret. Do not commit it or share it.
 
 ## Remote Config
 
-The app reads these values from Remote Config. If Remote Config is not available or a value is not valid, the app uses the local default in [src/config.ts](src/config.ts).
+If Remote Config is not available or a value is not valid, the app uses the local default in [src/config.ts](src/config.ts).
 
-| Parameter | Default | Valid range |
+| Parameter | Default | Use |
 |---|---|---|
-| `frame_interval_ms` | 8000 | Integer, 2000 to 120000 |
-| `cloud_frame_interval_ms` | 20000 | Integer, 2000 to 600000, never below `frame_interval_ms` |
-| `confidence_threshold` | 0.6 | 0 to 1 |
-| `daily_cloud_cap` | 50 | Integer, 0 to 10000 |
-| `read_prompt` | see `src/config.ts` | Non-empty text. `read.ts` appends the JSON format rules. |
-| `explain_prompt` | see `src/config.ts` | Non-empty text. `explain.ts` appends the JSON fields and the allowed mistake types. |
-| `cloud_model` | `gemini-3.5-flash-lite` | A Gemini model name |
-
-The app fetches new values at most once per hour in production and once per minute in development. A fetch that takes more than 3 seconds is skipped.
+| `cloud_frame_interval_ms` | 20000 | Minimum gap between cloud reads in cloud mode |
+| `confidence_threshold` | 0.6 | Below this, re-read the line in the cloud |
+| `daily_cloud_cap` | 50 | Cloud calls per user per day |
+| `read_prompt` | see `src/config.ts` | Base read prompt. `read.ts` appends the JSON format rules. |
+| `explain_prompt` | see `src/config.ts` | Base explain prompt. `explain.ts` appends the JSON fields and mistake types. |
+| `cloud_model` | `gemini-3.5-flash-lite` | Cloud Gemini model |
+| `frame_interval_ms` | 8000 | Not used yet. Lines are read when the detector sees a finished line, not on a timer. |
 
 ## Deploy
 
@@ -152,60 +173,15 @@ npm run build
 npx firebase-tools@15.37.0 deploy
 ```
 
-This deploys Hosting (from `dist/`), Firestore rules and indexes, and the Remote Config template (`remoteconfig.template.json`).
+This deploys Hosting (from `dist/`), Firestore rules and indexes, and the Remote Config template (`remoteconfig.template.json`). Deploying `remoteconfig` replaces the template in the console.
 
-To deploy one part only:
-
-```sh
-npx firebase-tools@15.37.0 deploy --only hosting
-npx firebase-tools@15.37.0 deploy --only firestore
-npx firebase-tools@15.37.0 deploy --only remoteconfig
-```
-
-Note: `firestore.rules` and `firestore.indexes.json` must exist before you deploy Firestore. If they are missing, `deploy` and `deploy --only firestore` fail. Use `--only hosting,remoteconfig` until they exist.
-
-Note: deploying `remoteconfig` replaces the template in the console. If you changed values in the console, update `remoteconfig.template.json` first.
-
-After the deploy, add the Hosting domain (`<project-id>.web.app`) to the reCAPTCHA Enterprise key's allowed domains.
+After the deploy, check that `<project-id>.web.app` is in the reCAPTCHA Enterprise key's allowed domains.
 
 ## How to test
 
-### Automated tests
-
-```sh
-npm test
-```
-
-### Spike page: Nano reading accuracy
-
-1. Open `/spike`.
-2. Click the button to download the on-device model. Wait for 100%.
-3. Choose photos of single handwritten lines (JPEG or PNG).
-4. For each row, type the expected answer. The page shows where each read ran (device or cloud) and the accuracy score.
-
-Target: at least 14 of 20 neat lines read correctly.
-
-### Practice page: the full loop
-
-1. Open `/practice`. Allow camera access.
-2. Put the page inside the guide box.
-3. Write a problem, then the steps, one line at a time. For example:
-   - `2(x + 3) = 10`
-   - `2x + 6 = 10`
-   - `2x = 16` (wrong on purpose)
-4. Check: the third line turns red, and a Hinglish explanation appears in under 5 seconds.
-5. Check: the hybrid meter shows more device reads than cloud calls.
-6. Open `/mistakes`. Check that the mistake type is in the list.
-
-### Wi-Fi off test
-
-This test needs Gemini Nano on the device (Chrome flag on, model downloaded). In cloud mode, reading needs the network.
-
-1. Open `/practice` and let the page load fully.
-2. Turn Wi-Fi off.
-3. Write two correct lines, then one wrong line.
-4. Check: each line is read with a "device" badge, and the wrong line turns red in under 3 seconds.
-5. Turn Wi-Fi on. Write one more wrong line. Check: the explanation appears. Explanations need the network; reading and checking do not.
+- Automated tests: `npm test`.
+- Judges and manual tests, including the Wi-Fi off test: [docs/TESTING.md](docs/TESTING.md).
+- Nano accuracy: open `/spike`, upload photos of single handwritten lines, type the expected answer for each, and read the accuracy score.
 
 ## License
 
