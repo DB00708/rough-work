@@ -32,3 +32,13 @@ Merge order: T2, T6, T1, T4, T5, T3, then T7 last (it has adapter files to fix u
 
 ## Review loop now
 Reviewers message their coder directly with MUST items and re-review each new commit. The orchestrator merges on a one-line "VERDICT: APPROVED <branch> @ <sha>".
+
+## Firebase setup (done Nov 25, ~00:00 IST)
+Project `rough-work-81b7f` (Spark plan). Web app registered; `.env.local` filled (git-ignored). AI Logic on (Gemini Developer API, App Check enforced, AI monitoring off). Anonymous Auth on. Firestore (default) in asia-south1, production mode. App Check: reCAPTCHA Enterprise key `rough-work-web` (localhost, *.web.app, *.firebaseapp.com) registered; debug token `local-dev` in `.env.local`.
+Not yet: Firestore rules deploy, Remote Config template publish, Hosting deploy (need `npx firebase-tools login`).
+
+## First live measurements (Chrome 158, typed-font test images)
+- Nano read: cold 19.7 s (first call), warm 1.9–2.4 s, 4/4 correct, conf 0.99–1.0.
+- Cloud read: 4.3 s, correct.
+- Cloud explain: 7.2 s (PRD target < 5 s) → T8: shorten prompt / output, drop english field or images, consider streaming. Hints came back in English, should be Hinglish.
+- Real handwriting accuracy (Day 1 gate 14/20) NOT measured yet: needs the user's 20 photos.
