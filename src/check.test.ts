@@ -198,6 +198,92 @@ describe('checkStep: unparseable input', () => {
   });
 });
 
+describe('review round 1', () => {
+  it('normalizes trig powers, unknown names, sci notation, ambiguous division', () => {
+    expect(normalizePlain('sin^2(x)')).toBe('(sin(x))^2');
+    expect(normalizePlain('cos^2 x')).toBe('(cos(x))^2');
+    expect(normalizePlain('sin²x')).toBe('(sin(x))^(2)');
+    expect(normalizePlain('2sin^2(x+1)')).toBe('2*(sin(x+1))^2');
+    expect(normalizePlain('cbrt(x)')).toContain('?');
+    expect(normalizePlain('log2(8)')).toContain('?');
+    expect(normalizePlain('sin^-1 x')).toContain('?');
+    expect(normalizePlain('1e6')).toBe('(1*10^(6))');
+    expect(normalizePlain('2.5E-3x')).toBe('(2.5*10^(-3))*x');
+    expect(normalizePlain('2e')).toBe('2*e');
+    expect(normalizePlain('1/2x')).toBe('1/2?x');
+    expect(normalizePlain('x/2 + 3x')).toBe('x/2+3*x');
+    expect(normalizePlain('(1/2)x')).toBe('(1/2)*x');
+  });
+
+  it('MUST 1: trig powers are functions, not variables', () => {
+    ok('sin^2(x)+cos^2(x)', '1');
+    ok('cos^2 x', 'cos(x)^2');
+    ok('sin^2 x', 'sin(x)^2');
+    ok('tan^2(x)+1', 'sec^2(x)');
+    bad('sin^2(x)+cos^2(x)', '2');
+  });
+
+  it('MUST 2: unknown function names are unsure, not wrong', () => {
+    unsure('x^(1/3)', 'cbrt(x)');
+    unsure('log2(8)', '3');
+    unsure('arcsin(1)', 'pi/2');
+  });
+
+  it('MUST 3: derivatives are unsure', () => {
+    unsure('d/dx(x^2)', '2x');
+    unsure('dy/dx = 2x', 'y = x^2');
+  });
+
+  it('MUST 4: rounded decimals are accepted', () => {
+    ok('x=1/3', 'x=0.333');
+    ok('x=2/3', 'x=0.67');
+    ok('sqrt(2)', '1.414');
+    ok('pi', '3.14');
+    ok('22/7', '3.14');
+    ok('x=sqrt2', 'x=1.41');
+    ok('3x = 1', 'x = 0.33');
+    ok('x^2 = 2', 'x = 1.41, -1.41');
+    expect(checkStep('x=1/3', 'x=0.333').reason).toContain('rounding');
+    // Beyond the precision written it is still wrong.
+    bad('x = 7/5', 'x = 1.5');
+    bad('1/3', '0.35');
+    // Rounding carried through a variable: close but not exact -> unsure.
+    unsure('x/3', '0.33x');
+  });
+
+  it('MUST 5: two-variable systems are not flagged', () => {
+    unsure('x+y=5', 'x-y=1');
+    unsure('2x+3y=12', 'x+y=5');
+    // An isolated-variable rewrite can still be judged both ways.
+    ok('2x + y = 5', 'y = 5 - 2x');
+    bad('2x + y = 5', 'y = 5 + 2x');
+  });
+
+  it('SHOULD: log and ln mixed is unsure', () => {
+    unsure('log(x)', 'ln(x)');
+    ok('log(100)', '2');
+    ok('ln(x^2)', '2ln(x)'); // note: accepted, test points are positive
+  });
+
+  it('SHOULD: scientific notation', () => {
+    ok('x=1000000', 'x=1e6');
+    ok('0.0025', '2.5e-3');
+  });
+
+  it('SHOULD: answer lists with an expression on the left', () => {
+    ok('(x+1)^2=9', 'x+1=±3');
+    ok('(x+1)^2=9', 'x+1=3 or x+1=-3');
+    ok('(x+1)^2=9', 'x+1=3');
+    bad('(x+1)^2=9', 'x+1=±4');
+  });
+
+  it('SHOULD: ambiguous division with implicit product is unsure', () => {
+    unsure('a/(bc)', 'a/bc');
+    unsure('x/2', '1/2x');
+    ok('x/2', '(1/2)x');
+  });
+});
+
 describe('checkStep: speed', () => {
   it('each check takes under 50 ms (after warm-up)', () => {
     checkStep('x^2=4', 'x=2'); // warm-up: nerdamer parser init
