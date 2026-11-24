@@ -18,9 +18,9 @@ const SIGN_SLIP: Explanation = {
 };
 
 /** Four sample lines: three correct steps around one sign slip on line 3. */
-export const DEMO_LINES: { plain: string; fallback?: Explanation }[] = [
+export const DEMO_LINES: { plain: string; explanation?: Explanation }[] = [
   { plain: '3*(x-2) = 2*x + 4' },
   { plain: '3*x - 6 = 2*x + 4' },
-  { plain: '3*x - 2*x = 4 - 6', fallback: SIGN_SLIP },
+  { plain: '3*x - 2*x = 4 - 6', explanation: SIGN_SLIP },
   { plain: 'x = 10' },
 ];

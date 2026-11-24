@@ -42,7 +42,7 @@ export interface PipelineDeps {
 
 export interface PipelineSetup {
   cfg: AppConfig;
-  /** Anonymous user id. Null when Firebase is not available (demo mode). */
+  /** Anonymous user id. Null when Firebase is not available. */
   uid: string | null;
   /** True when Nano is not available: reads go to the cloud, slower. */
   cloudMode: boolean;
@@ -58,16 +58,23 @@ export interface PipelineState {
   notice: string | null;
 }
 
-/** Extra data for a text-only line (demo mode, or typed input). */
-export interface TextLineOptions {
-  /** Used when the cloud explanation cannot be fetched (demo without Firebase). */
-  fallbackExplanation?: Explanation;
+/** Options for a demo line (typed, no crop). */
+export interface DemoLineOptions {
+  /** Shown when this line is wrong. Demo lines never call the cloud. */
+  explanation?: Explanation;
 }
 
 type Job =
   | { kind: 'crop'; id: string }
   | { kind: 'text'; id: string }
   | { kind: 'recheck'; id: string };
+
+/** Snapshot of what to write for session counts, taken synchronously. */
+interface CountsSnapshot {
+  uid: string;
+  sid: Promise<string | null>;
+  counts: SessionCounts;
+}
 
 export const COUNTS_DEBOUNCE_MS = 2000;
 
@@ -87,6 +94,9 @@ export function findPrevAnchor(lines: Line[], index: number): Line | undefined {
   }
   return undefined;
 }
+
+/** Lines sent to Firestore never carry an image. */
+const textOnly = (l: Line): Line => ({ ...l, cropDataUrl: '' });
 
 export class Pipeline {
   private deps: PipelineDeps;
@@ -108,10 +118,18 @@ export class Pipeline {
   private sessionPromise: Promise<string | null> | null = null;
   private problemText = '';
   private countsTimer: ReturnType<typeof setTimeout> | null = null;
-  private fallbacks = new Map<string, Explanation>();
+  /** Demo lines: no cloud, no logging, not in session counts. */
+  private demo = new Map<string, Explanation | undefined>();
   /** id -> normalized plain that two reads already agreed on. */
   private confirmed = new Map<string, string>();
-  private disposed = false;
+  /**
+   * Bumped by reset() and stop(). A job or session start from an older
+   * generation must not touch the new state.
+   */
+  private gen = 0;
+  /** Generation of the job that is running now. */
+  private jobGen = 0;
+  private stopped = false;
 
   constructor(deps: PipelineDeps) {
     this.deps = deps;
@@ -119,14 +137,16 @@ export class Pipeline {
 
   // ---- public API -------------------------------------------------------
 
+  /** Start (or restart after stop()) with config, account and Nano status. */
   init(setup: PipelineSetup): void {
     this.setup = setup;
+    this.stopped = false;
     this.patch({ cloudMode: setup.cloudMode });
     this.pump();
   }
 
   get isReady(): boolean {
-    return this.setup !== null;
+    return this.setup !== null && !this.stopped;
   }
 
   setProblemText(text: string): void {
@@ -148,18 +168,23 @@ export class Pipeline {
   /** A new line crop from the capture module or the spacebar. */
   addCrop(cropDataUrl: string): string {
     const line = this.appendLine({ cropDataUrl });
+    this.scheduleCounts();
     this.enqueue({ kind: 'crop', id: line.id });
     return line.id;
   }
 
-  /** A typed line with no crop (demo mode). Skips the read. */
-  addText(plain: string, opts: TextLineOptions = {}): string {
+  /**
+   * A demo line: typed text, no crop, no read. It is checked like any line,
+   * but never calls the cloud, is never logged, and is not counted in the
+   * session, so demo mode is offline-safe and keeps "My mistakes" clean.
+   */
+  addDemoLine(plain: string, opts: DemoLineOptions = {}): string {
     const line = this.appendLine({
       cropDataUrl: '',
       read: { latex: plain, plain, confidence: 1, source: 'device', ms: 0 },
       editedByUser: true,
     });
-    if (opts.fallbackExplanation) this.fallbacks.set(line.id, opts.fallbackExplanation);
+    this.demo.set(line.id, opts.explanation);
     this.enqueue({ kind: 'text', id: line.id });
     return line.id;
   }
@@ -185,31 +210,36 @@ export class Pipeline {
     if (next) this.enqueue({ kind: 'recheck', id: next.id });
   }
 
-  /** Clear all lines and counters (new problem). */
+  /** Clear all lines and counters (new problem). The old session keeps its final counts. */
   reset(): void {
     this.flushCounts();
+    this.gen++;
     this.queue = [];
     this.sid = null;
     this.sessionPromise = null;
-    this.fallbacks.clear();
+    this.demo.clear();
     this.confirmed.clear();
-    this.patch({ lines: [], counts: { deviceReads: 0, cloudCalls: 0 }, pending: 0, notice: null });
+    this.patch({ lines: [], counts: { deviceReads: 0, cloudCalls: 0 }, pending: this.running ? 1 : 0, notice: null });
+    this.settleIfIdle();
   }
 
-  /** Write counters now (page hide / unmount). */
-  flushCounts(): void {
-    if (this.countsTimer) {
-      clearTimeout(this.countsTimer);
-      this.countsTimer = null;
-      void this.writeCounts();
-    }
-  }
-
-  dispose(): void {
+  /** Stop work (unmount). Lines stay; init() starts it again. */
+  stop(): void {
     this.flushCounts();
-    this.disposed = true;
+    this.gen++;
+    this.stopped = true;
     this.queue = [];
-    this.listeners.clear();
+    this.patch({ pending: 0 });
+    this.settleIfIdle();
+  }
+
+  /** Write counters now (page hide / reset / stop). */
+  flushCounts(): void {
+    if (!this.countsTimer) return;
+    clearTimeout(this.countsTimer);
+    this.countsTimer = null;
+    const snap = this.snapshotCounts();
+    if (snap) void this.writeCounts(snap);
   }
 
   // ---- state helpers ----------------------------------------------------
@@ -228,6 +258,16 @@ export class Pipeline {
     this.patch({ lines });
   }
 
+  /** True when the running job belongs to an older generation. */
+  private stale(): boolean {
+    return this.jobGen !== this.gen;
+  }
+
+  /** Job-side line write; dropped for a stale job. */
+  private setLine(id: string, p: Partial<Line>): void {
+    if (!this.stale()) this.updateLine(id, p);
+  }
+
   private appendLine(p: Pick<Line, 'cropDataUrl'> & Partial<Line>): Line {
     const line: Line = {
       id: newId(),
@@ -236,11 +276,11 @@ export class Pipeline {
       ...p,
     };
     this.patch({ lines: [...this.state.lines, line] });
-    this.scheduleCounts();
     return line;
   }
 
   private bump(source: 'device' | 'cloud'): void {
+    if (this.stale()) return;
     const c = this.state.counts;
     this.patch({
       counts:
@@ -254,7 +294,6 @@ export class Pipeline {
   // ---- queue ------------------------------------------------------------
 
   private enqueue(job: Job): void {
-    if (this.disposed) return;
     this.queue.push(job);
     if (!this.idleResolve) {
       this.idle = new Promise((r) => (this.idleResolve = r));
@@ -263,25 +302,33 @@ export class Pipeline {
     this.pump();
   }
 
-  private pump(): void {
-    if (this.running || !this.setup || this.disposed) return;
-    const job = this.queue.shift();
-    if (!job) {
+  private settleIfIdle(): void {
+    if (!this.running && this.queue.length === 0) {
       this.idleResolve?.();
       this.idleResolve = null;
+    }
+  }
+
+  private pump(): void {
+    if (this.running || !this.setup || this.stopped) return;
+    const job = this.queue.shift();
+    if (!job) {
+      this.settleIfIdle();
       this.patch({ pending: 0 });
       return;
     }
     this.running = true;
+    this.jobGen = this.gen;
     this.patch({ pending: this.queue.length + 1 });
     void this.run(job)
       .catch((e) => {
         console.warn('[pipeline] job failed', e);
-        if (this.find(job.id)) this.updateLine(job.id, { status: 'unsure' });
+        if (this.find(job.id)) this.setLine(job.id, { status: 'unsure' });
       })
       .finally(() => {
         this.running = false;
-        this.pump();
+        if (this.stopped) this.settleIfIdle();
+        else this.pump();
       });
   }
 
@@ -292,6 +339,7 @@ export class Pipeline {
       if (r !== 'read') return;
     }
     await this.evaluate(job.id, job.kind === 'crop');
+    if (this.stale()) return;
 
     // A fix can turn a line OK; then a later red/amber line may now follow from it.
     if (job.kind === 'recheck') {
@@ -333,6 +381,7 @@ export class Pipeline {
     if (read.source === 'cloud') this.recordCloud();
   }
 
+  /** Quota is real usage, so it is recorded even for a stale job. */
   private recordCloud(): void {
     const uid = this.setup?.uid;
     if (!uid) return;
@@ -343,12 +392,22 @@ export class Pipeline {
     }
   }
 
+  /**
+   * Nano dropped out mid-session (PREFER_ON_DEVICE fell back to the cloud).
+   * Switch to cloud mode: badge, slower interval, every read behind the cap.
+   */
+  private enterCloudMode(): void {
+    if (!this.setup || this.setup.cloudMode) return;
+    this.setup = { ...this.setup, cloudMode: true };
+    this.patch({ cloudMode: true });
+  }
+
   private async allowCloud(): Promise<boolean> {
     const { uid, cfg } = this.setup!;
-    if (!uid) return true; // no account (demo): nothing to meter
+    if (!uid) return true; // no account: nothing to meter
     try {
       const ok = await this.deps.canCallCloud(uid, cfg);
-      if (!ok) this.patch({ notice: 'Daily cloud limit reached. Fix lines by hand.' });
+      if (!ok && !this.stale()) this.patch({ notice: 'Daily cloud limit reached. Fix lines by hand.' });
       return ok;
     } catch {
       return false;
@@ -356,32 +415,36 @@ export class Pipeline {
   }
 
   /** 'failed' means the line is already marked unsure. */
-  private async readCrop(id: string): Promise<'read' | 'failed' | 'edited'> {
-    const { cfg, cloudMode } = this.setup!;
+  private async readCrop(id: string): Promise<'read' | 'failed' | 'edited' | 'stale'> {
+    const { cfg } = this.setup!;
     const line = this.find(id);
     if (!line) return 'failed';
     if (line.editedByUser) return 'edited';
 
-    if (cloudMode && !(await this.allowCloud())) {
-      this.updateLine(id, { status: 'unsure', check: { verdict: 'unparseable', reason: 'cloud limit reached' } });
+    if (this.setup!.cloudMode && !(await this.allowCloud())) {
+      this.setLine(id, { status: 'unsure', check: { verdict: 'unparseable', reason: 'cloud limit reached' } });
       return 'failed';
     }
 
     await this.waitForReadSlot();
+    if (this.stale()) return 'stale';
     let read: LineRead;
     try {
       read = await this.deps.readLine(line.cropDataUrl, cfg);
       this.markRead();
       this.countRead(read);
+      if (read.source === 'cloud') this.enterCloudMode();
     } catch (e) {
       this.markRead();
       console.warn('[pipeline] readLine failed', e);
-      this.updateLine(id, { status: 'unsure', check: { verdict: 'unparseable', reason: 'could not read the line' } });
+      this.setLine(id, { status: 'unsure', check: { verdict: 'unparseable', reason: 'could not read the line' } });
       return 'failed';
     }
+    if (this.stale()) return 'stale';
 
     // Rule 2: low confidence -> re-read once in the cloud.
     if (read.source === 'device' && read.confidence < cfg.confidenceThreshold && (await this.allowCloud())) {
+      if (this.stale()) return 'stale';
       try {
         const cloud = await this.deps.readLineInCloud(line.cropDataUrl, cfg);
         this.countRead(cloud);
@@ -389,11 +452,12 @@ export class Pipeline {
       } catch (e) {
         console.warn('[pipeline] readLineInCloud failed', e);
       }
+      if (this.stale()) return 'stale';
     }
 
     // The student may have fixed the line while we were reading.
     if (this.find(id)?.editedByUser) return 'edited';
-    this.updateLine(id, { read });
+    this.setLine(id, { read });
     return 'read';
   }
 
@@ -417,6 +481,7 @@ export class Pipeline {
   }
 
   private async evaluate(id: string, freshRead: boolean): Promise<void> {
+    if (this.stale()) return;
     const line = this.find(id);
     if (!line?.read) return;
     const plain = line.read.plain;
@@ -425,7 +490,7 @@ export class Pipeline {
     // First line (or nothing valid before it): it is the anchor. OK if it parses.
     if (!prev?.read) {
       const self = this.safeCheck(plain, plain);
-      this.updateLine(id, {
+      this.setLine(id, {
         status: self.verdict === 'unparseable' ? 'unsure' : 'ok',
         check: self.verdict === 'unparseable' ? self : { verdict: 'equivalent', reason: 'first line' },
         explanation: undefined,
@@ -435,12 +500,12 @@ export class Pipeline {
 
     const check = this.safeCheck(prev.read.plain, plain);
     if (check.verdict === 'equivalent') {
-      this.updateLine(id, { status: 'ok', check, explanation: undefined });
+      this.setLine(id, { status: 'ok', check, explanation: undefined });
       return;
     }
     if (check.verdict === 'unparseable') {
       // Rule 4: amber, no cloud call.
-      this.updateLine(id, { status: 'unsure', check, explanation: undefined });
+      this.setLine(id, { status: 'unsure', check, explanation: undefined });
       return;
     }
 
@@ -453,8 +518,9 @@ export class Pipeline {
       (freshRead || this.confirmed.get(id) !== this.norm(plain));
     if (needConfirm) {
       const agree = await this.confirmRead(line);
+      if (this.stale()) return;
       if (!agree) {
-        this.updateLine(id, {
+        this.setLine(id, {
           status: 'unsure',
           check: { verdict: 'unparseable', reason: 'two reads disagree; check the transcription' },
           explanation: undefined,
@@ -465,7 +531,7 @@ export class Pipeline {
     }
     if (this.find(id)?.read?.plain !== plain) return; // edited meanwhile; recheck is queued
 
-    this.updateLine(id, { status: 'wrong', check, explanation: undefined });
+    this.setLine(id, { status: 'wrong', check, explanation: undefined });
     await this.explain(id, prev);
   }
 
@@ -474,6 +540,7 @@ export class Pipeline {
     const { cfg } = this.setup!;
     try {
       await this.waitForReadSlot();
+      if (this.stale()) return false;
       const again = await this.deps.readLine(line.cropDataUrl, cfg);
       this.markRead();
       this.countRead(again);
@@ -486,66 +553,97 @@ export class Pipeline {
   }
 
   private async explain(id: string, prev: Line): Promise<void> {
-    const { cfg, uid } = this.setup!;
     const line = this.find(id)!;
-    const fallback = this.fallbacks.get(id);
-    let explanation: Explanation | undefined;
 
-    if (await this.allowCloud()) {
-      try {
-        explanation = await this.deps.explainMistake(
-          {
-            prev: prev.read!.plain,
-            next: line.read!.plain,
-            prevCrop: prev.cropDataUrl || undefined,
-            nextCrop: line.cropDataUrl || undefined,
-          },
-          cfg,
-        );
-        this.bump('cloud');
-        this.recordCloud();
-      } catch (e) {
-        console.warn('[pipeline] explainMistake failed', e);
-      }
+    // Demo lines: bundled explanation only. No cloud, no log.
+    if (this.demo.has(id)) {
+      const ex = this.demo.get(id);
+      if (ex) this.setLine(id, { explanation: ex });
+      return;
     }
-    explanation ??= fallback;
-    if (!explanation) return; // stays red; the UI shows "no explanation"
+
+    const { cfg, uid } = this.setup!;
+    if (!(await this.allowCloud()) || this.stale()) return;
+    let explanation: Explanation;
+    try {
+      explanation = await this.deps.explainMistake(
+        {
+          prev: prev.read!.plain,
+          next: line.read!.plain,
+          prevCrop: prev.cropDataUrl || undefined,
+          nextCrop: line.cropDataUrl || undefined,
+        },
+        cfg,
+      );
+      this.recordCloud();
+      this.bump('cloud');
+    } catch (e) {
+      console.warn('[pipeline] explainMistake failed', e);
+      return; // stays red; the UI shows "no explanation"
+    }
+    if (this.stale()) return;
 
     const current = this.find(id);
     if (!current || current.status !== 'wrong' || current.read?.plain !== line.read!.plain) return;
-    this.updateLine(id, { explanation });
+    this.setLine(id, { explanation });
 
+    if (!uid) return;
     const sid = await this.ensureSession();
-    if (uid && sid) {
-      try {
-        await this.deps.logMistake(uid, sid, { ...current, explanation }, prev, explanation);
-      } catch (e) {
-        console.warn('[pipeline] logMistake failed', e);
-      }
+    if (!sid || this.stale()) return;
+    try {
+      await this.deps.logMistake(uid, sid, textOnly({ ...current, explanation }), textOnly(prev), explanation);
+    } catch (e) {
+      console.warn('[pipeline] logMistake failed', e);
     }
   }
 
   // ---- session + counts -------------------------------------------------
 
+  /**
+   * Session id for the current generation. A startSession that resolves
+   * after reset() still answers its own caller but does not become the new
+   * problem's session.
+   */
   private ensureSession(): Promise<string | null> {
     const uid = this.setup?.uid;
     if (!uid) return Promise.resolve(null);
     if (this.sid) return Promise.resolve(this.sid);
     if (!this.sessionPromise) {
-      this.sessionPromise = this.deps
+      const g = this.gen;
+      const p = this.deps
         .startSession(uid, this.problemText)
-        .then((sid) => {
-          this.sid = sid || null;
-          if (!this.sid) this.sessionPromise = null;
-          return this.sid;
-        })
+        .then((sid) => sid || null)
         .catch((e) => {
           console.warn('[pipeline] startSession failed', e);
-          this.sessionPromise = null;
           return null;
+        })
+        .then((sid) => {
+          if (g === this.gen) {
+            this.sid = sid;
+            if (!sid) this.sessionPromise = null;
+          }
+          return sid;
         });
+      this.sessionPromise = p;
     }
     return this.sessionPromise;
+  }
+
+  private countedLines(): number {
+    let n = 0;
+    for (const l of this.state.lines) if (!this.demo.has(l.id)) n++;
+    return n;
+  }
+
+  /** Taken synchronously, so a later reset() cannot change what gets written. */
+  private snapshotCounts(): CountsSnapshot | null {
+    const uid = this.setup?.uid;
+    if (!uid) return null;
+    return {
+      uid,
+      sid: this.ensureSession(),
+      counts: { ...this.state.counts, linesTotal: this.countedLines() },
+    };
   }
 
   private scheduleCounts(): void {
@@ -553,20 +651,16 @@ export class Pipeline {
     if (this.countsTimer) clearTimeout(this.countsTimer);
     this.countsTimer = setTimeout(() => {
       this.countsTimer = null;
-      void this.writeCounts();
+      const snap = this.snapshotCounts();
+      if (snap) void this.writeCounts(snap);
     }, COUNTS_DEBOUNCE_MS);
   }
 
-  private async writeCounts(): Promise<void> {
-    const uid = this.setup?.uid;
-    if (!uid) return;
-    const sid = await this.ensureSession();
+  private async writeCounts(snap: CountsSnapshot): Promise<void> {
+    const sid = await snap.sid;
     if (!sid) return;
     try {
-      await this.deps.updateSessionCounts(uid, sid, {
-        ...this.state.counts,
-        linesTotal: this.state.lines.length,
-      });
+      await this.deps.updateSessionCounts(snap.uid, sid, snap.counts);
     } catch (e) {
       console.warn('[pipeline] updateSessionCounts failed', e);
     }
@@ -582,6 +676,8 @@ export function hybridRatio(c: HybridCounts): string {
 /**
  * React hook. Creates one Pipeline for the component's life; call
  * `pipeline.init(...)` once config, uid and device availability are known.
+ * On unmount the pipeline stops (queue dropped, counts flushed); init()
+ * re-arms it, so StrictMode's mount/unmount/mount is safe.
  */
 export function usePipeline(deps: PipelineDeps): { pipeline: Pipeline; state: PipelineState } {
   const ref = useRef<Pipeline | null>(null);
@@ -594,7 +690,7 @@ export function usePipeline(deps: PipelineDeps): { pipeline: Pipeline; state: Pi
     window.addEventListener('pagehide', onHide);
     return () => {
       window.removeEventListener('pagehide', onHide);
-      pipeline.flushCounts();
+      pipeline.stop();
     };
   }, [pipeline]);
 

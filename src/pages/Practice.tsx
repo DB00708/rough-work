@@ -29,6 +29,14 @@ export default function Practice() {
   const [demoRunning, setDemoRunning] = useState(false);
   const detectorRef = useRef<LineDetector | null>(null);
   const listEndRef = useRef<HTMLLIElement>(null);
+  const unmounted = useRef(false);
+
+  useEffect(() => {
+    unmounted.current = false;
+    return () => {
+      unmounted.current = true;
+    };
+  }, []);
 
   // Boot: config, anonymous sign-in, Nano check. Each step fails soft.
   useEffect(() => {
@@ -96,10 +104,11 @@ export default function Practice() {
     pipeline.reset();
     setProblem(DEMO_PROBLEM);
     for (const l of DEMO_LINES) {
-      pipeline.addText(l.plain, { fallbackExplanation: l.fallback });
+      if (unmounted.current) return;
+      pipeline.addDemoLine(l.plain, { explanation: l.explanation });
       await new Promise((r) => setTimeout(r, DEMO_STEP_MS));
     }
-    setDemoRunning(false);
+    if (!unmounted.current) setDemoRunning(false);
   }, [demoRunning, pipeline]);
 
   const newProblem = () => {

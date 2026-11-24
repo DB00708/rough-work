@@ -152,7 +152,10 @@ export function LineItem({ line, onEdit }: LineItemProps) {
       </div>
       {line.status === 'wrong' &&
         (line.explanation ? (
-          <ExplanationPanel explanation={line.explanation} />
+          <ExplanationPanel
+            key={`${line.explanation.mistakeType}|${line.explanation.hinglish}`}
+            explanation={line.explanation}
+          />
         ) : (
           <p className="explain explain-missing">This step does not follow from the line before. No explanation yet (offline or daily limit).</p>
         ))}
