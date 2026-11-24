@@ -45,6 +45,6 @@ Not yet: Firestore rules deploy, Remote Config template publish, Hosting deploy 
 
 ## Phase 2 (Nov 25 ~00:30)
 All of T1–T7 merged; main builds, 252 tests pass.
-- T8 fixes (explain < 5 s, Hinglish hints, quota fail-closed, taxonomy): proposed as card task_7c4d5281; user must click Start. Reviewer: reuse t4-reviewer (local_51e01654-8078-412d-beba-b85a35d3d8cb) via SendMessage.
-- T9 docs (README, DEVPOST, DEMO_SCRIPT, TESTING): proposed as card task_5a977807. Reviewer: reuse t6-reviewer (local_43723da3-f191-40d2-9d3f-761dcd34966c).
+- T8 fixes (explain < 5 s, Hinglish hints, quota fail-closed, taxonomy): assigned 04:06 to t4-coder-explain (local_44659a34-32ef-4a11-a5a4-ac0653ca91cb), branch task/T8-fixes. Reviewer: t4-reviewer (local_51e01654-8078-412d-beba-b85a35d3d8cb).
+- T9 docs (README, DEVPOST, DEMO_SCRIPT, TESTING): assigned 04:06 to t6-coder-config (local_19ee461a-00a0-4203-af28-56207ab4a8e9), branch task/T9-docs. Reviewer: t6-reviewer (local_43723da3-f191-40d2-9d3f-761dcd34966c).
 Rule learned: automated turns (session notes, scheduled runs) cannot start sessions; reuse idle reviewer sessions with SendMessage instead.
