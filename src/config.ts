@@ -16,9 +16,8 @@ If the photo shows more than one line, transcribe only the lowest complete line.
 Give "latex" for display, "plain" as plain ASCII maths for a computer algebra system, and an honest "confidence".
 Use a confidence below 0.6 if any symbol is unclear, crossed out, smudged or cut off at the edge. Do not guess high.`;
 
-const EXPLAIN_PROMPT = `The student is in Class 10-12 or preparing for JEE/NEET in India.
-Explain only the step from LINE A to LINE B. Do not re-solve the full problem.
-Keep it short and kind. Blame the step, not the student.`;
+const EXPLAIN_PROMPT = `Student: Class 10-12 or JEE/NEET, India. Tutor tone: short, kind, like a didi/bhaiya. Blame the step, not the student.
+Explain only the step from LINE A to LINE B, in Roman-script Hinglish.`;
 
 export const DEFAULT_CONFIG: AppConfig = {
   frameIntervalMs: 8000,

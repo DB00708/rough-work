@@ -58,9 +58,27 @@ describe('quota', () => {
     expect(await canCallCloud('u1', { dailyCloudCap: Number.NaN }, day1)).toBe(false);
   });
 
-  it('treats corrupt stored values as 0', () => {
+  it.each(['garbage', '-1', '3abc', '1.5', '', 'Infinity', '9999999999'])(
+    'fails closed on a corrupt stored count (%j) and leaves it in place',
+    async (raw) => {
+      store.setItem('rw.cloudCalls.u1.2026-11-24', raw);
+      expect(await canCallCloud('u1', { dailyCloudCap: 10_000 }, day1)).toBe(false);
+      recordCloudCall('u1', day1);
+      expect(store.getItem('rw.cloudCalls.u1.2026-11-24')).toBe(raw);
+      expect(await canCallCloud('u1', cfg, day1)).toBe(false);
+    },
+  );
+
+  it('a corrupt count from an earlier day does not block today', async () => {
     store.setItem('rw.cloudCalls.u1.2026-11-24', 'garbage');
-    expect(getCloudCallsToday('u1', day1)).toBe(0);
+    expect(await canCallCloud('u1', cfg, day2)).toBe(true);
+    recordCloudCall('u1', day2);
+    expect(store.getItem('rw.cloudCalls.u1.2026-11-24')).toBeNull();
+  });
+
+  it('accepts a stored count with surrounding whitespace', () => {
+    store.setItem('rw.cloudCalls.u1.2026-11-24', ' 2 ');
+    expect(getCloudCallsToday('u1', day1)).toBe(2);
   });
 
   it('falls back to memory when storage throws', async () => {
