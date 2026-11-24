@@ -473,3 +473,25 @@ describe('reset and stop', () => {
     expect(p.getState().lines[0].status).toBe('ok');
   });
 });
+
+describe('helpers', () => {
+  it('hybridRatio', () => {
+    expect(hybridRatio({ deviceReads: 47, cloudCalls: 2 })).toBe('24:1');
+    expect(hybridRatio({ deviceReads: 5, cloudCalls: 0 })).toBe('5:0');
+  });
+
+  it('findPrevAnchor returns the last OK line, skipping wrong and unsure ones', () => {
+    const mk = (i: number, status: Line['status'], edited = false): Line => ({
+      id: String(i),
+      index: i,
+      cropDataUrl: '',
+      status,
+      read: r('x=1'),
+      editedByUser: edited,
+    });
+    const lines = [mk(0, 'ok'), mk(1, 'ok', true), mk(2, 'wrong', true), mk(3, 'unsure'), mk(4, 'checking')];
+    expect(findPrevAnchor(lines, 4)?.id).toBe('1');
+    expect(findPrevAnchor(lines, 1)?.id).toBe('0');
+    expect(findPrevAnchor(lines, 0)).toBeUndefined();
+  });
+});
