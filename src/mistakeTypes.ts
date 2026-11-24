@@ -200,7 +200,12 @@ export function guessMistakeType(prev: string, next: string): MistakeSlug {
   const b = next.replace(/\s+/g, '');
   // A bracket disappeared: the step expanded it.
   if (count(a, '(') > count(b, '(')) return /-\(/.test(a) ? 'sign_error_expanding_brackets' : 'distribution_error';
-  // x^2 = k  ->  x = sqrt(k) with no ± / second root.
-  if (/\^2=/.test(a) && /sqrt/.test(b) && !/±|\+-|-sqrt|or|,/.test(b)) return 'square_root_missing_negative';
+  // x^2 = k  ->  x = sqrt(k) or x = 4, with no ± / second root.
+  const sq = a.match(/^\(?([a-z])\)?\^2=/i);
+  if (sq && !/±|\+-|-sqrt|or|and|,/i.test(b)) {
+    const prefix = `${sq[1].toLowerCase()}=`;
+    const rhs = b.toLowerCase().startsWith(prefix) ? b.slice(prefix.length) : '';
+    if (/^(sqrt\(.+\)|\d+(\.\d+)?)$/.test(rhs)) return 'square_root_missing_negative';
+  }
   return 'other';
 }

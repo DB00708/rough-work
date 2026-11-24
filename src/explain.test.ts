@@ -25,6 +25,7 @@ import {
   GENERIC_EXPLANATION,
   isExplainError,
   isLocalFallback,
+  NO_THINKING_TOKEN_MULTIPLIER,
   localFallbackExplanation,
   looksPureEnglish,
   parseExplanation,
@@ -285,7 +286,39 @@ describe('explainMistake', () => {
     const e = await explainMistake({ prev: 'a', next: 'b' }, DEFAULT_CONFIG);
     expect(e.mistakeType).toBe('sign_error_expanding_brackets');
     expect(generateContent).toHaveBeenCalledTimes(2);
-    expect(lastModelParams().inCloudParams.generationConfig.thinkingConfig).toBeUndefined();
+    expect(lastModelParams().inCloudParams.generationConfig.thinkingConfig).toBeUndefined();    expect(lastModelParams().inCloudParams.generationConfig.maxOutputTokens).toBe(
+      EXPLAIN_MAX_OUTPUT_TOKENS * NO_THINKING_TOKEN_MULTIPLIER,
+    );
+  });
+
+  it('retries both concurrent calls that were sent with thinkingConfig', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let rejectA!: (e: Error) => void;
+    let rejectB!: (e: Error) => void;
+    generateContent
+      .mockImplementationOnce(() => new Promise((_, r) => (rejectA = r)))
+      .mockImplementationOnce(() => new Promise((_, r) => (rejectB = r)))
+      .mockResolvedValue(reply(good));
+    const a = explainMistake({ prev: 'a', next: 'b' }, DEFAULT_CONFIG);
+    const b = explainMistake({ prev: 'a', next: 'c' }, DEFAULT_CONFIG);
+    await Promise.resolve();
+    rejectA(new Error('thinking_level is not supported'));
+    await Promise.resolve();
+    rejectB(new Error('thinking_level is not supported'));
+    const [ea, eb] = await Promise.all([a, b]);
+    expect(ea.mistakeType).toBe('sign_error_expanding_brackets');
+    expect(eb.mistakeType).toBe('sign_error_expanding_brackets');
+    expect(generateContent).toHaveBeenCalledTimes(4);
+  });
+
+  it('does not retry a thinking error from a call sent without thinkingConfig', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    generateContent.mockRejectedValue(new Error('thinking something'));
+    const err = await explainMistake({ prev: 'a', next: 'b' }, { ...DEFAULT_CONFIG, cloudModel: 'gemini-2.0-flash' }).catch(
+      (e: unknown) => e,
+    );
+    expect(isExplainError(err) && err.kind).toBe('network');
+    expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
   it('times out, aborts the request and resolves with the local fallback', async () => {

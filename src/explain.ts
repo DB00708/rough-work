@@ -263,45 +263,40 @@ function cachedModel(key: string, make: () => GenerativeModel): GenerativeModel 
 /** Models whose thinkingConfig was rejected once; later calls skip it. */
 const noThinking = new Set<string>();
 
-const thinkingFor = (model: string) => (noThinking.has(model) ? undefined : thinkingConfigFor(model));
+/** A model plus whether it was built with a thinkingConfig. */
+interface BuiltModel {
+  model: GenerativeModel;
+  withThinking: boolean;
+}
 
-function getExplainModel(cfg: AppConfig): GenerativeModel {
-  const system = buildSystemPrompt(cfg);
-  const thinking = thinkingFor(cfg.cloudModel);
-  return cachedModel(`explain|${cfg.cloudModel}|${thinking ? 't' : '-'}|${system}`, () =>
+/**
+ * Output cap. With minimal thinking the cap is tight. Without a thinkingConfig the model
+ * uses its default thinking, which counts against maxOutputTokens, so the cap is raised
+ * to keep the JSON from being truncated.
+ */
+export const NO_THINKING_TOKEN_MULTIPLIER = 8;
+
+function buildModel(kind: 'explain' | 'english', cfg: AppConfig): BuiltModel {
+  const thinking = noThinking.has(cfg.cloudModel) ? undefined : thinkingConfigFor(cfg.cloudModel);
+  const system = kind === 'explain' ? buildSystemPrompt(cfg) : ENGLISH_PROMPT;
+  const baseCap = kind === 'explain' ? EXPLAIN_MAX_OUTPUT_TOKENS : ENGLISH_MAX_OUTPUT_TOKENS;
+  const maxOutputTokens = thinking ? baseCap : baseCap * NO_THINKING_TOKEN_MULTIPLIER;
+  const model = cachedModel(`${kind}|${cfg.cloudModel}|${thinking ? 't' : '-'}|${system}`, () =>
     getGenerativeModel(getAI(getApp(), { backend: new GoogleAIBackend() }), {
       mode: InferenceMode.ONLY_IN_CLOUD,
       inCloudParams: {
         model: cfg.cloudModel,
         systemInstruction: system,
         generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: explanationSchema,
-          maxOutputTokens: EXPLAIN_MAX_OUTPUT_TOKENS,
+          ...(kind === 'explain' ? { responseMimeType: 'application/json', responseSchema: explanationSchema } : {}),
+          maxOutputTokens,
           temperature: 0.2,
           ...(thinking ? { thinkingConfig: thinking } : {}),
         },
       },
     }),
   );
-}
-
-function getEnglishModel(cfg: AppConfig): GenerativeModel {
-  const thinking = thinkingFor(cfg.cloudModel);
-  return cachedModel(`english|${cfg.cloudModel}|${thinking ? 't' : '-'}`, () =>
-    getGenerativeModel(getAI(getApp(), { backend: new GoogleAIBackend() }), {
-      mode: InferenceMode.ONLY_IN_CLOUD,
-      inCloudParams: {
-        model: cfg.cloudModel,
-        systemInstruction: ENGLISH_PROMPT,
-        generationConfig: {
-          maxOutputTokens: ENGLISH_MAX_OUTPUT_TOKENS,
-          temperature: 0.2,
-          ...(thinking ? { thinkingConfig: thinking } : {}),
-        },
-      },
-    }),
-  );
+  return { model, withThinking: thinking !== undefined };
 }
 
 const TIMED_OUT = Symbol('timeout');
@@ -321,7 +316,7 @@ async function textOf(p: ReturnType<GenerativeModel['generateContent']>): Promis
  * thinking setting, retries once without it (inside the same timeout).
  */
 async function generateText(
-  getModel: () => GenerativeModel,
+  getModel: () => BuiltModel,
   parts: Part[],
   cloudModel: string,
   timeoutMs: number,
@@ -336,14 +331,16 @@ async function generateText(
   });
 
   const call = async (): Promise<string> => {
+    const first = getModel();
     try {
-      return await textOf(getModel().generateContent(parts, { signal: controller.signal }));
+      return await textOf(first.model.generateContent(parts, { signal: controller.signal }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : '';
-      if (controller.signal.aborted || noThinking.has(cloudModel) || !/thinking/i.test(msg)) throw err;
-      console.warn('[explain] model rejected thinkingConfig, retrying without it:', msg);
+      // Retry only if THIS attempt carried a thinkingConfig (safe with concurrent calls).
+      if (controller.signal.aborted || !first.withThinking || !/thinking/i.test(msg)) throw err;
+      if (!noThinking.has(cloudModel)) console.warn('[explain] model rejected thinkingConfig, retrying without it:', msg);
       noThinking.add(cloudModel);
-      return textOf(getModel().generateContent(parts, { signal: controller.signal }));
+      return textOf(getModel().model.generateContent(parts, { signal: controller.signal }));
     }
   };
 
@@ -375,7 +372,7 @@ export async function explainMistake(
   const t0 = performance.now();
   const timeoutMs = opts.timeoutMs ?? EXPLAIN_TIMEOUT_MS;
   const parts = buildParts(input, cfg.explainWithImages === true);
-  const text = await generateText(() => getExplainModel(cfg), parts, cfg.cloudModel, timeoutMs);
+  const text = await generateText(() => buildModel('explain', cfg), parts, cfg.cloudModel, timeoutMs);
   const ms = performance.now() - t0;
   if (text === TIMED_OUT) {
     console.warn(`[explain] timed out after ${timeoutMs} ms, using local fallback`);
@@ -400,7 +397,7 @@ export async function explainInEnglish(
   if (e.english) return e.english;
   const fallback = `${e.mistakeLabel}. Compare this line with the previous one, term by term.`;
   const text = await generateText(
-    () => getEnglishModel(cfg),
+    () => buildModel('english', cfg),
     [{ type: 'text', text: e.hinglish }],
     cfg.cloudModel,
     opts.timeoutMs ?? EXPLAIN_TIMEOUT_MS,

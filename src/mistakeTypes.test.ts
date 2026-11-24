@@ -49,7 +49,11 @@ describe('guessMistakeType', () => {
 
   it('spots a missing ± on a square root', () => {
     expect(guessMistakeType('x^2 = 9', 'x = sqrt(9)')).toBe('square_root_missing_negative');
+    expect(guessMistakeType('x^2 = 16', 'x = 4')).toBe('square_root_missing_negative');
     expect(guessMistakeType('x^2 = 9', 'x = ±sqrt(9)')).toBe('other');
+    expect(guessMistakeType('x^2 = 16', 'x = 4 or x = -4')).toBe('other');
+    expect(guessMistakeType('x^2 = 16', 'x = 4, -4')).toBe('other');
+    expect(guessMistakeType('x^2 + 1 = 17', 'x = 4')).toBe('other');
   });
 
   it('returns other without a clear signal', () => {
