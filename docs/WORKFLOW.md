@@ -22,7 +22,7 @@ The main orchestrator session owns `main`. Nothing merges to `main` without a re
 ## Reviewer session
 1. Check out nothing. Read the branch with `git diff main...<branch>` and `git show`.
 2. Check: matches PRD + CONTRACTS, correct, no secrets, no stored frames, types compile, tests meaningful, edge cases handled.
-3. You may run `npm run build` / `npm test` in a temporary worktree of the branch (`git worktree add`), then remove it.
+3. You may run `npm run build` / `npm test` in a temporary worktree of the branch (`git worktree add`, then `npm ci` inside that worktree), then remove it. Never touch the main checkout's node_modules.
 4. Report in this exact shape:
    ```
    VERDICT: APPROVED | CHANGES_REQUESTED
