@@ -27,20 +27,31 @@ function getStorage(): Storage | null {
   }
 }
 
+/** A stored count that is not a plain non-negative integer. Treated as "cap reached" (fail closed). */
+export const CORRUPT_COUNT = Number.POSITIVE_INFINITY;
+
+/**
+ * Stored count for `key`: 0 when absent, CORRUPT_COUNT when the value is not a
+ * plain integer, null when storage itself is unavailable or throws.
+ */
 function readStored(key: string): number | null {
   const s = getStorage();
   if (!s) return null;
   try {
     const raw = s.getItem(key);
     if (raw === null) return 0;
-    const n = Number.parseInt(raw, 10);
-    return Number.isFinite(n) && n >= 0 ? n : 0;
+    const t = raw.trim();
+    if (!/^\d{1,9}$/.test(t)) return CORRUPT_COUNT;
+    return Number.parseInt(t, 10);
   } catch {
     return null;
   }
 }
 
-/** Calls used today by this user (max of storage and in-memory count). */
+/**
+ * Calls used today by this user (max of storage and in-memory count).
+ * A corrupt stored value gives CORRUPT_COUNT, so canCallCloud() fails closed until the next local day.
+ */
 export function getCloudCallsToday(uid: string, now: Date = new Date()): number {
   const key = storageKey(uid, localDateKey(now));
   const stored = readStored(key) ?? 0;
@@ -57,7 +68,10 @@ export async function canCallCloud(uid: string, cfg: Pick<AppConfig, 'dailyCloud
 export function recordCloudCall(uid: string, now: Date = new Date()): void {
   const date = localDateKey(now);
   const key = storageKey(uid, date);
-  const next = getCloudCallsToday(uid, now) + 1;
+  const used = getCloudCallsToday(uid, now);
+  // Corrupt count: leave it in place (stays closed today); nothing sensible to add to it.
+  if (used === CORRUPT_COUNT) return;
+  const next = used + 1;
   memoryCounts.set(key, next);
   const s = getStorage();
   if (!s) return;

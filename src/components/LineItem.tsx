@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { Explanation, Line, LineStatus } from '../types';
-import { speak } from './modulesAdapter';
+import { DEFAULT_CONFIG, loadConfig } from '../config';
+import { explainInEnglish } from '../explain';
+import { ensureSignedIn, isFirebaseConfigured } from '../firebase';
+import { LOCAL_QUOTA_ID } from '../pipeline';
+import { canCallCloud, recordCloudCall, speak } from './modulesAdapter';
 
 const STATUS_LABEL: Record<LineStatus, string> = {
   checking: 'checking',
@@ -30,35 +34,91 @@ function SourceBadge({ line }: { line: Line }) {
   );
 }
 
-function ExplanationPanel({ explanation }: { explanation: Explanation }) {
+/** English text per line, kept for the page's lifetime so toggling back does not call the cloud again. */
+const englishCache = new Map<string, string>();
+
+type EnglishFailure = 'limit' | 'error';
+
+/** One on-demand cloud call for the English version, within the daily cloud cap. */
+async function fetchEnglish(explanation: Explanation): Promise<string | EnglishFailure> {
+  if (explanation.english) return explanation.english;
+  if (!isFirebaseConfigured()) return 'error';
+  try {
+    const cfg = await loadConfig().catch(() => DEFAULT_CONFIG);
+    const quotaId = await ensureSignedIn().catch(() => LOCAL_QUOTA_ID);
+    if (!(await canCallCloud(quotaId, cfg))) return 'limit';
+    const text = await explainInEnglish(explanation, cfg);
+    recordCloudCall(quotaId);
+    return text;
+  } catch (e) {
+    console.warn('[LineItem] English explanation failed', e);
+    return 'error';
+  }
+}
+
+function ExplanationPanel({ explanation, lineId }: { explanation: Explanation; lineId: string }) {
+  const cacheKey = `${lineId}|${explanation.hinglish}`;
   const [english, setEnglish] = useState(false);
+  const [englishText, setEnglishText] = useState<string | undefined>(
+    () => explanation.english ?? englishCache.get(cacheKey),
+  );
+  const [loading, setLoading] = useState(false);
+  const [failure, setFailure] = useState<EnglishFailure | null>(null);
   const [hintsShown, setHintsShown] = useState(0);
-  const hasEnglish = !!explanation.english;
-  const text = english && hasEnglish ? explanation.english! : explanation.hinglish;
-  const label = english ? explanation.mistakeLabel : explanation.mistakeLabelHinglish;
+  const showEnglish = english && !!englishText;
+  const text = showEnglish ? englishText! : explanation.hinglish;
+  const label = showEnglish ? explanation.mistakeLabel : explanation.mistakeLabelHinglish;
   const hintNames = ['Nudge', 'Method', 'Answer'];
+
+  const toggleEnglish = async () => {
+    if (english || englishText) {
+      setEnglish((v) => !v);
+      return;
+    }
+    setLoading(true);
+    setFailure(null);
+    const result = await fetchEnglish(explanation);
+    setLoading(false);
+    if (result === 'limit' || result === 'error') {
+      setFailure(result);
+      return;
+    }
+    englishCache.set(cacheKey, result);
+    setEnglishText(result);
+    setEnglish(true);
+  };
 
   return (
     <div className="explain">
       <p className="explain-type">{label}</p>
-      <p className="explain-text" lang={english ? 'en' : 'hi-Latn'}>
+      <p className="explain-text" lang={showEnglish ? 'en' : 'hi-Latn'}>
         {text}
       </p>
       <div className="explain-actions">
-        {hasEnglish && (
-          <button type="button" className="btn btn-small" onClick={() => setEnglish((v) => !v)} aria-pressed={english}>
-            {english ? 'Hinglish' : 'English'}
-          </button>
-        )}
         <button
           type="button"
           className="btn btn-small"
-          onClick={() => speak(text, english ? 'en-IN' : 'hi-IN')}
+          onClick={toggleEnglish}
+          aria-pressed={showEnglish}
+          aria-busy={loading}
+          disabled={loading}
+        >
+          {loading ? 'English…' : showEnglish ? 'Hinglish' : 'English'}
+        </button>
+        <button
+          type="button"
+          className="btn btn-small"
+          onClick={() => speak(text, showEnglish ? 'en-IN' : 'hi-IN')}
           aria-label="Read the explanation aloud"
         >
           ▶ Speak
         </button>
       </div>
+      {failure && (
+        <p className="line-reason" role="status">
+          {failure === 'limit' ? 'Daily cloud limit reached, so English is not available.' : 'English is not available right now. Try again later.'}
+        </p>
+      )}
       {hintsShown > 0 && (
         <ol className="hints">
           {explanation.hints.slice(0, hintsShown).map((h, i) => (
@@ -155,6 +215,7 @@ export function LineItem({ line, onEdit }: LineItemProps) {
           <ExplanationPanel
             key={`${line.explanation.mistakeType}|${line.explanation.hinglish}`}
             explanation={line.explanation}
+            lineId={line.id}
           />
         ) : (
           <p className="explain explain-missing">This step does not follow from the line before. No explanation yet (offline or daily limit).</p>

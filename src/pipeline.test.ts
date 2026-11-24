@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { COUNTS_DEBOUNCE_MS, LOCAL_QUOTA_ID, Pipeline, findPrevAnchor, hybridRatio, type PipelineDeps } from './pipeline';
 import type { AppConfig, Explanation, Line, LineRead, StepCheck } from './types';
+import { localFallbackExplanation } from './explain';
 
 const cfg: AppConfig = {
   frameIntervalMs: 8000,
@@ -197,6 +198,23 @@ describe('Pipeline routing', () => {
     expect(s.lines[1].status).toBe('wrong');
     expect(s.lines[1].explanation).toBeUndefined();
     expect(deps.logMistake).not.toHaveBeenCalled();
+  });
+
+  it('a timeout fallback explanation is shown and counted but not logged', async () => {
+    const fallback = localFallbackExplanation({ prev: 'x=2', next: 'x=5' }, 5000);
+    const { deps, calls } = makeDeps(
+      { a: [r('x=2')], b: [r('x=5')] },
+      { explainMistake: vi.fn(async () => fallback) },
+    );
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    const s = await run(p, ['a', 'b']);
+    expect(s.lines[1].status).toBe('wrong');
+    expect(s.lines[1].explanation).toBe(fallback);
+    expect(s.counts.cloudCalls).toBe(1);
+    expect(calls.record).toBe(1);
+    expect(deps.logMistake).not.toHaveBeenCalled();
+    expect(deps.startSession).not.toHaveBeenCalled();
   });
 
   it('demo lines: bundled explanation, no cloud, no log, not counted, even with a uid', async () => {

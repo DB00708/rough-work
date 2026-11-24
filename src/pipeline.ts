@@ -10,6 +10,7 @@ import type {
   LineRead,
   StepCheck,
 } from './types';
+import { isLocalFallback } from './explain';
 
 export interface ExplainArgs {
   prev: string;
@@ -621,7 +622,9 @@ export class Pipeline {
     if (!current || current.status !== 'wrong' || current.read?.plain !== line.read!.plain) return;
     this.setLine(id, { explanation });
 
-    if (!uid) return;
+    // A timeout fallback is a local guess, not a diagnosis: show it, but keep it out of
+    // "My mistakes" and the global mistakeTypes counts. (The cloud call was still counted.)
+    if (!uid || isLocalFallback(explanation)) return;
     const sid = await this.ensureSession();
     if (!sid || this.stale()) return;
     try {

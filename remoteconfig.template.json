@@ -38,7 +38,7 @@
     },
     "explain_prompt": {
       "defaultValue": {
-        "value": "The student is in Class 10-12 or preparing for JEE/NEET in India.\nExplain only the step from LINE A to LINE B. Do not re-solve the full problem.\nKeep it short and kind. Blame the step, not the student."
+        "value": "Student: Class 10-12 or JEE/NEET, India. Tutor tone: short, kind, like a friendly older sibling; do not call the student bhaiya or didi. Blame the step, not the student.\nExplain only the step from LINE A to LINE B, in Roman-script Hinglish."
       },
       "description": "Base prompt for explaining a wrong step. explain.ts appends the JSON fields and allowed mistake types.",
       "valueType": "STRING"

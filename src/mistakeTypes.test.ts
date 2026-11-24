@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMistakeType, MISTAKE_SLUGS, MISTAKE_TYPES, toMistakeSlug } from './mistakeTypes';
+import { getMistakeType, guessMistakeType, MISTAKE_SLUGS, MISTAKE_TYPES, toMistakeSlug } from './mistakeTypes';
 
 describe('mistake taxonomy', () => {
   it('has unique snake_case slugs including the required ones and other', () => {
@@ -10,6 +10,9 @@ describe('mistake taxonomy', () => {
       'sign_error_expanding_brackets', 'wrong_sign_moving_term', 'distribution_error', 'exponent_rule_error',
       'fraction_addition_error', 'division_by_variable', 'square_root_missing_negative', 'derivative_power_rule',
       'chain_rule_missing', 'arithmetic_slip', 'copying_error', 'other',
+      // T8 additions
+      'quotient_rule_error', 'product_rule_error', 'inequality_sign_flip', 'log_rule_error', 'trig_identity_error',
+      'factorisation_error', 'integral_limits_error', 'missing_constant_of_integration', 'cancelling_across_addition',
     ]) expect(MISTAKE_SLUGS).toContain(s);
   });
 
@@ -18,6 +21,8 @@ describe('mistake taxonomy', () => {
       expect(t.label.trim()).not.toBe('');
       expect(t.labelHinglish.trim()).not.toBe('');
       expect(t.labelHinglish).not.toMatch(/[ऀ-ॿ]/);
+      expect(t.tipHinglish.trim()).not.toBe('');
+      expect(t.tipHinglish).not.toMatch(/[ऀ-ॿ]/);
     }
   });
 
@@ -33,5 +38,26 @@ describe('mistake taxonomy', () => {
     expect(toMistakeSlug(42)).toBe('other');
     expect(getMistakeType('nope').slug).toBe('other');
     expect(getMistakeType('arithmetic_slip').label).toBe('Arithmetic slip');
+  });
+});
+
+describe('guessMistakeType', () => {
+  it('spots expanded brackets', () => {
+    expect(guessMistakeType('-(x - 3) = 5', '-x - 3 = 5')).toBe('sign_error_expanding_brackets');
+    expect(guessMistakeType('2(x + 3) = 10', '2x + 3 = 10')).toBe('distribution_error');
+  });
+
+  it('spots a missing ± on a square root', () => {
+    expect(guessMistakeType('x^2 = 9', 'x = sqrt(9)')).toBe('square_root_missing_negative');
+    expect(guessMistakeType('x^2 = 16', 'x = 4')).toBe('square_root_missing_negative');
+    expect(guessMistakeType('x^2 = 9', 'x = ±sqrt(9)')).toBe('other');
+    expect(guessMistakeType('x^2 = 16', 'x = 4 or x = -4')).toBe('other');
+    expect(guessMistakeType('x^2 = 16', 'x = 4, -4')).toBe('other');
+    expect(guessMistakeType('x^2 + 1 = 17', 'x = 4')).toBe('other');
+  });
+
+  it('returns other without a clear signal', () => {
+    expect(guessMistakeType('x + 1 = 3', 'x = 4')).toBe('other');
+    expect(guessMistakeType('', '')).toBe('other');
   });
 });
