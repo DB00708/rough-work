@@ -1,0 +1,102 @@
+rules_version = '2';
+
+// Rough Work. Text only: no images or frames are ever stored.
+// Limits match src/data/helpers.ts LIMITS.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function shortString(v, max) {
+      return v is string && v.size() <= max && !v.matches('(?is)\\s*data:.*');
+    }
+
+    function validSlug(t) {
+      return t is string && t.size() >= 1 && t.size() <= 80 && t.matches('^[a-z0-9_]+$');
+    }
+
+    function nonNegInt(v) {
+      return v is int && v >= 0;
+    }
+
+    // ---- users/{uid}/sessions/{sid} ----
+    function validSession(d) {
+      return d.keys().hasOnly(['startedAt', 'problemText', 'linesTotal', 'deviceReads', 'cloudCalls'])
+        && d.startedAt is timestamp
+        && shortString(d.problemText, 500)
+        && nonNegInt(d.linesTotal)
+        && nonNegInt(d.deviceReads)
+        && nonNegInt(d.cloudCalls);
+    }
+
+    // ---- users/{uid}/mistakes/{mid} ----
+    function validMistake(d) {
+      return d.keys().hasOnly(['sessionId', 'type', 'lineBefore', 'lineAfter', 'explanation', 'createdAt'])
+        && d.keys().hasAll(['sessionId', 'type', 'lineBefore', 'lineAfter', 'explanation', 'createdAt'])
+        && shortString(d.sessionId, 128)
+        && validSlug(d.type)
+        && shortString(d.lineBefore, 500)
+        && shortString(d.lineAfter, 500)
+        && shortString(d.explanation, 1000)
+        && d.createdAt is timestamp;
+    }
+
+    match /users/{uid} {
+      allow read, write: if isOwner(uid);
+
+      match /sessions/{sid} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && validSession(request.resource.data)
+          && request.resource.data.startedAt == request.time;
+        allow update: if isOwner(uid)
+          && validSession(request.resource.data)
+          && request.resource.data.startedAt == resource.data.startedAt;
+      }
+
+      match /mistakes/{mid} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid)
+          && validMistake(request.resource.data)
+          && request.resource.data.createdAt == request.time;
+        allow update: if isOwner(uid)
+          && validMistake(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt;
+      }
+
+      // Other per-user docs (e.g. daily cloud quota) stay owner-only, one level deep.
+      match /{coll}/{docId} {
+        allow read, write: if isOwner(uid) && !(coll in ['sessions', 'mistakes']);
+      }
+    }
+
+    // ---- mistakeTypes/{type}: global counts for "Common mistakes" ----
+    function validTypeLabels(d) {
+      return d.keys().hasOnly(['label', 'labelHinglish', 'count'])
+        && shortString(d.label, 120)
+        && shortString(d.labelHinglish, 120);
+    }
+
+    match /mistakeTypes/{type} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && validSlug(type)
+        && validTypeLabels(request.resource.data)
+        && request.resource.data.count == 1;
+      allow update: if signedIn()
+        && validTypeLabels(request.resource.data)
+        && request.resource.data.count == resource.data.count + 1;
+    }
+
+    // Deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
