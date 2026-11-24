@@ -8,6 +8,8 @@ import {
   dilate,
   findBands,
   integralImage,
+  maxComponentHeight,
+  orMask,
   padBand,
   rowProfile,
   subtractMask,
@@ -137,5 +139,21 @@ describe('band helpers', () => {
     expect(padBand({ y0: 1, y1: 30, ink: 1 }, 3, 32)).toEqual({ y0: 0, y1: 31, ink: 1 });
     expect(bandOverlap({ y0: 0, y1: 5, ink: 0 }, { y0: 4, y1: 9, ink: 0 })).toBe(2);
     expect(bandOverlap({ y0: 0, y1: 3, ink: 0 }, { y0: 4, y1: 9, ink: 0 })).toBe(0);
+  });
+});
+
+describe('orMask / maxComponentHeight', () => {
+  it('ORs masks', () => {
+    expect(Array.from(orMask(Uint8Array.from([0, 1, 0]), Uint8Array.from([0, 0, 1])))).toEqual([0, 1, 1]);
+  });
+
+  it('measures the tallest 8-connected blob', () => {
+    const m = new Uint8Array(W * H);
+    // A short "character" 5 rows tall.
+    for (let y = 2; y <= 6; y++) m[y * W + 3] = 1;
+    // A diagonal edge 20 rows tall (connected through corners).
+    for (let y = 10; y < 30; y++) m[y * W + 10 + y] = 1;
+    expect(maxComponentHeight(m, W, H)).toBe(20);
+    expect(maxComponentHeight(new Uint8Array(W * H), W, H)).toBe(0);
   });
 });

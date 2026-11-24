@@ -20,6 +20,24 @@ function block(m: Uint8Array, y0: number, y1: number) {
   return out;
 }
 
+/** Hollow outline (2 px thick): what the adaptive threshold makes of a hand. */
+function ring(m: Uint8Array, y0: number, y1: number, x0: number, x1: number) {
+  const out = m.slice();
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const edge = y - y0 < 2 || y1 - y < 2 || x - x0 < 2 || x1 - x < 2;
+      if (edge) out[y * W + x] = 1;
+    }
+  }
+  return out;
+}
+
+function clearRect(m: Uint8Array, y0: number, y1: number, x0: number, x1: number) {
+  const out = m.slice();
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) out[y * W + x] = 0;
+  return out;
+}
+
 function feed(core: ReturnType<typeof createDetectorCore>, mask: Uint8Array, times: number): CoreEvent[] {
   const events: CoreEvent[] = [];
   for (let i = 0; i < times; i++) {
@@ -158,10 +176,88 @@ describe('detectorCore', () => {
     expect(core.force()).toMatchObject({ type: 'line', forced: true, rawBand: { y0: 10, y1: 14 } });
   });
 
-  it('rebaselines when most ink disappears (erased or page swapped)', () => {
+  it('erasing ink does not emit, and the erased ink stays known until reset()', () => {
     const core = createDetectorCore({ width: W, height: H });
     feed(core, write(empty(), 10, 30, 10, 90), 4);
-    expect(feed(core, empty(), 4)).toEqual([{ type: 'rebaseline', reason: 'ink-loss' }]);
+    expect(feed(core, empty(), 20)).toEqual([]);
+    expect(core.state().status).toBe('obstructed');
+    expect(core.state().obstruction).toBe('covered');
+  });
+
+  it('a hand covering existing text, then leaving, never emits the text (MUST 1)', () => {
+    const core = createDetectorCore({ width: W, height: H, rebaselineSamples: 12 });
+    const page = write(write(empty(), 10, 14, 10, 80), 20, 24, 10, 80);
+    expect(feed(core, page, 4)).toEqual([{ type: 'baseline' }]);
+    // Hand outline over the text; the text under the hand is hidden.
+    const hand = ring(clearRect(page, 8, 40, 30, 70), 8, 40, 30, 70);
+    expect(feed(core, hand, 20)).toEqual([]); // well past 1.5 s and past rebaselineSamples
+    expect(core.state().obstruction).toBe('covered');
+    expect(feed(core, page, 6)).toEqual([]); // hand lifts: old text reappears
+    // Real new writing is still detected afterwards.
+    const next = write(page, 50, 54, 10, 60);
+    const [e] = feed(core, next, 4);
+    expect(e).toMatchObject({ type: 'line', rawBand: { y0: 50, y1: 54 } });
+  });
+
+  it('a still hand outline (thin ring, 35% of ROI) does not emit (MUST 2)', () => {
+    const core = primed();
+    const hand = ring(empty(), 20, 47, 30, 70);
+    expect(feed(core, hand, 8)).toEqual([]);
+    expect(core.state().obstruction).toBe('tall');
+    expect(core.force()).toBeNull();
+  });
+
+  it('a smaller still hand outline (20% of ROI) is rejected as a blob (MUST 2)', () => {
+    const core = primed();
+    const hand = ring(empty(), 30, 45, 30, 60);
+    expect(feed(core, hand, 8)).toEqual([]);
+    expect(core.state().obstruction).toBe('blob');
+  });
+
+  it('ink reaching the bottom edge (arm entering) does not emit', () => {
+    const core = primed();
+    const arm = write(empty(), 72, 79, 40, 60);
+    expect(feed(core, arm, 8)).toEqual([]);
+    expect(core.state().obstruction).toBe('bottom-edge');
+  });
+
+  it('slow writing: emits once the pause is stable, then amends as the line grows', () => {
+    const core = primed();
+    let m = empty();
+    const lines: CoreEvent[] = [];
+    // 10 new ink px per sample: under the still tolerance, so the scene counts as still.
+    for (let x = 10; x < 60; x += 4) {
+      m = write(m, 20, 24, x, x + 2);
+      const e = core.push(m);
+      if (e?.type === 'line') lines.push(e);
+    }
+    expect(lines.length).toBeGreaterThanOrEqual(2);
+    expect(lines[0]).toMatchObject({ amends: false });
+    for (const e of lines.slice(1)) expect(e).toMatchObject({ amends: true, rawBand: { y0: 20, y1: 24 } });
+  });
+
+  it('a tall next line that overlaps the last rows but starts at the left is not an amendment', () => {
+    const core = primed();
+    const a = write(empty(), 20, 24, 10, 60);
+    feed(core, a, 4);
+    const b = write(a, 23, 31, 10, 60); // e.g. a fraction whose top touches the line above
+    const [e] = feed(core, b, 4);
+    expect(e).toMatchObject({ type: 'line', amends: false });
+  });
+
+  it('tolerates edge flicker that scales with ink on a dense page', () => {
+    const core = createDetectorCore({ width: W, height: H });
+    const page = write(empty(), 2, 70, 2, 97); // ~3300 ink px
+    let flick = page;
+    const events: CoreEvent[] = [];
+    for (let i = 0; i < 6; i++) {
+      flick = flick.slice();
+      // Flip 40 ink pixels per sample (> 0.2% of 8000 = 16, < 3% of ink).
+      for (let k = 0; k < 40; k++) flick[(2 + k) * W + 2 + (i % 2) * 2] ^= 1;
+      const e = core.push(flick);
+      if (e) events.push(e);
+    }
+    expect(events).toEqual([{ type: 'baseline' }]);
   });
 
   it('reset() forgets the baseline', () => {

@@ -2,14 +2,21 @@
 // is exactly the size of the displayed video frame (e.g. the <video> with
 // width:100%; height:auto, no letterboxing), so normalized ROI coordinates
 // match the frame. Drag the box to move it, drag a corner to resize.
+// Do not mirror (CSS-flip) the video: the ROI maps to the unflipped frame.
+//
+//   const { roi, committedRoi, setRoi, commitRoi } = usePersistentRoi();
+//   <FrameGuide roi={roi} onChange={setRoi} onChangeEnd={commitRoi} />
+//   useEffect(() => detector.setRoi(committedRoi), [committedRoi]);
 
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { moveRoi, resizeRoi, type Corner, type Roi } from './roi';
 
 export interface FrameGuideProps {
   roi: Roi;
-  /** Called while dragging (live) and on release. Omit to make the guide read-only. */
+  /** Called on every pointer move while dragging (live). Omit both callbacks for a read-only guide. */
   onChange?: (roi: Roi) => void;
+  /** Called once when a drag ends, with the final ROI. Save and reset the detector here. */
+  onChangeEnd?: (roi: Roi) => void;
   /** Text shown in the box. Default "Frame your page". */
   label?: string;
   /** Hide the label (e.g. once practice has started). */
@@ -31,17 +38,19 @@ interface DragState {
 
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se'];
 
-export function FrameGuide({ roi, onChange, label = 'Frame your page', hideLabel, color = '#14b8a6' }: FrameGuideProps) {
+export function FrameGuide({ roi, onChange, onChangeEnd, label = 'Frame your page', hideLabel, color = '#14b8a6' }: FrameGuideProps) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const drag = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState(false);
-  const editable = !!onChange;
+  const editable = !!(onChange || onChangeEnd);
+  const latest = useRef<Roi>(roi);
 
   const begin = (mode: DragMode) => (e: PointerEvent<HTMLElement>) => {
     if (!editable || !layerRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     const rect = layerRef.current.getBoundingClientRect();
+    latest.current = roi;
     drag.current = { mode, startX: e.clientX, startY: e.clientY, startRoi: roi, width: rect.width, height: rect.height };
     try {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -53,16 +62,19 @@ export function FrameGuide({ roi, onChange, label = 'Frame your page', hideLabel
 
   const onMove = (e: PointerEvent<HTMLElement>) => {
     const d = drag.current;
-    if (!d || !onChange || d.width === 0 || d.height === 0) return;
+    if (!d || d.width === 0 || d.height === 0) return;
     const dx = (e.clientX - d.startX) / d.width;
     const dy = (e.clientY - d.startY) / d.height;
-    onChange(d.mode.kind === 'move' ? moveRoi(d.startRoi, dx, dy) : resizeRoi(d.startRoi, d.mode.corner, dx, dy));
+    const next = d.mode.kind === 'move' ? moveRoi(d.startRoi, dx, dy) : resizeRoi(d.startRoi, d.mode.corner, dx, dy);
+    latest.current = next;
+    onChange?.(next);
   };
 
   const end = (e: PointerEvent<HTMLElement>) => {
     if (!drag.current) return;
     drag.current = null;
     setDragging(false);
+    onChangeEnd?.(latest.current);
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {

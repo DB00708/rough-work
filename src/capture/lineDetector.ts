@@ -6,7 +6,13 @@
 // or uploads a frame; the crop data URL is handed to listeners and kept only
 // as `lastCrop` for the debug view.
 
-import { createDetectorCore, type CoreOptions, type CoreStatus, type DetectorCore } from './detectorCore';
+import {
+  createDetectorCore,
+  type CoreOptions,
+  type CoreStatus,
+  type DetectorCore,
+  type ObstructionReason,
+} from './detectorCore';
 import { DEFAULT_ROI, clampRoi, roiToPixels, type Roi } from './roi';
 import { adaptiveThreshold, denoise, toGray, type Band, type Mask } from './vision';
 
@@ -61,6 +67,8 @@ export interface LineDetectorOptions {
 
 export interface DetectorDebug {
   status: CoreStatus | 'no-video';
+  /** Why the scene is obstructed (hand, arm, covered text), if it is. */
+  obstruction: ObstructionReason | null;
   stillCount: number;
   lastChange: number;
   procWidth: number;
@@ -79,14 +87,19 @@ export interface DetectorDebug {
 export interface LineDetector {
   /** Feed a frame; sampled at most once per intervalMs. Returns a line if one finished. */
   onFrame(video: HTMLVideoElement): CapturedLine | null;
-  /** Spacebar fallback: crop the ink added since the last emit, now. */
+  /**
+   * Spacebar fallback: crop the ink added since the last emit, now.
+   * Returns null when there is no new ink or a hand/arm is in the guide box
+   * (see getDebug().obstruction). Before the first baseline, all ink counts as new.
+   */
   forceLineDone(video?: HTMLVideoElement): CapturedLine | null;
   /** Subscribe to finished lines. Returns an unsubscribe function. */
   onLine(cb: LineListener): () => void;
   /** Start an internal timer that samples `video` every intervalMs. */
   start(video: HTMLVideoElement): void;
+  /** Stop the timer. Call it on unmount, or the timer keeps sampling the old video. */
   stop(): void;
-  /** Forget the baseline; the next stable frame becomes the new baseline. */
+  /** Forget all known ink; the next stable frame becomes the new baseline. Call it for a new page. */
   reset(): void;
   /** Change the guide box. Resets the baseline. */
   setRoi(roi: Roi): void;
@@ -271,6 +284,7 @@ export function createLineDetector(opts: LineDetectorOptions = {}): LineDetector
       const s = core?.state();
       return {
         status: s ? s.status : 'no-video',
+        obstruction: s?.obstruction ?? null,
         stillCount: s?.stillCount ?? 0,
         lastChange: s?.lastChange ?? 0,
         procWidth: core?.options.width ?? 0,

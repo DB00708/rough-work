@@ -105,7 +105,11 @@ export function useCamera(options: UseCameraOptions = {}): UseCamera {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [deviceId, setDeviceId] = useState<string | null>(loadDeviceId);
 
+  const detachListeners = useRef<(() => void) | null>(null);
+
   const releaseStream = useCallback(() => {
+    detachListeners.current?.();
+    detachListeners.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     const v = videoRef.current;
@@ -125,21 +129,34 @@ export function useCamera(options: UseCameraOptions = {}): UseCamera {
     const v = videoRef.current;
     const stream = streamRef.current;
     if (!v || !stream || v.srcObject === stream) return;
+    detachListeners.current?.();
     v.srcObject = stream;
     v.muted = true;
     v.playsInline = true;
+    const check = () => {
+      if (id !== requestId.current) return;
+      if (v.videoWidth > 0 && v.videoHeight > 0 && v.readyState >= 2) setReady(true);
+    };
     const play = () => {
+      if (id !== requestId.current) return;
       v.play()
-        .then(() => {
-          if (id === requestId.current && v.videoWidth > 0) setReady(true);
-        })
+        .then(check)
         .catch(() => {
-          // Autoplay of a muted inline video should not fail; if it does,
-          // the next user gesture calling start() retries.
+          // Autoplay of a muted inline video rarely fails; we retry on the
+          // next 'canplay', and start() retries on a user gesture.
         });
     };
+    // Dimensions can arrive after play() resolves, so also re-check on
+    // loadeddata / resize / playing; retry play() on loadedmetadata / canplay.
+    const checkEvents = ['loadeddata', 'resize', 'playing'] as const;
+    const playEvents = ['loadedmetadata', 'canplay'] as const;
+    checkEvents.forEach((e) => v.addEventListener(e, check));
+    playEvents.forEach((e) => v.addEventListener(e, play));
+    detachListeners.current = () => {
+      checkEvents.forEach((e) => v.removeEventListener(e, check));
+      playEvents.forEach((e) => v.removeEventListener(e, play));
+    };
     if (v.readyState >= 1) play();
-    else v.addEventListener('loadedmetadata', play, { once: true });
   }, []);
 
   const open = useCallback(

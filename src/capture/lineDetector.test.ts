@@ -52,12 +52,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function run(det: ReturnType<typeof createLineDetector>, n: number) {
+function run(det: ReturnType<typeof createLineDetector>, n: number, v: HTMLVideoElement = video) {
   const out = [];
   for (let i = 0; i < n; i++) {
     // Advance the clock past intervalMs so onFrame samples every call.
     vi.advanceTimersByTime(600);
-    const line = det.onFrame(video);
+    const line = det.onFrame(v);
     if (line) out.push(line);
   }
   return out;
@@ -125,6 +125,33 @@ describe('createLineDetector (fake canvas)', () => {
     expect(line.bbox.x).toBe(320);
     expect(line.bbox.width).toBe(640);
     expect(line.bbox.y).toBeGreaterThanOrEqual(360);
+  });
+
+  it('maps crops to the video resolution, not the analysis size (1920x1080)', () => {
+    const hd = { readyState: 4, videoWidth: 1920, videoHeight: 1080 } as unknown as HTMLVideoElement;
+    const det = createLineDetector({ roi: { x: 0, y: 0, w: 1, h: 1 } });
+    run(det, 4, hd);
+    inkRows = [[60, 66]]; // analysis 320x180, scale 6
+    const [line] = run(det, 4, hd);
+    expect(line.bbox.width).toBe(1920);
+    expect(line.bbox.y).toBeLessThanOrEqual(60 * 6);
+    expect(line.bbox.y).toBeGreaterThanOrEqual(50 * 6);
+    expect(line.bbox.y + line.bbox.height).toBeGreaterThanOrEqual(67 * 6);
+    expect(line.cropDataUrl).toMatch(/w=1024;/); // capped
+  });
+
+  it('handles a tall ROI that hits the 480-row analysis clamp', () => {
+    const tall = { readyState: 4, videoWidth: 320, videoHeight: 1280 } as unknown as HTMLVideoElement;
+    const det = createLineDetector({ roi: { x: 0, y: 0, w: 1, h: 1 } });
+    run(det, 4, tall);
+    expect(det.getDebug().procHeight).toBe(480);
+    inkRows = [[200, 206]]; // scale 1280/480
+    const [line] = run(det, 4, tall);
+    const scale = 1280 / 480;
+    expect(line.bbox.y).toBeLessThanOrEqual(200 * scale);
+    expect(line.bbox.y).toBeGreaterThanOrEqual(190 * scale);
+    expect(line.bbox.y + line.bbox.height).toBeGreaterThanOrEqual(207 * scale);
+    expect(line.bbox.width).toBe(320);
   });
 
   it('ignores frames before the video has dimensions', () => {

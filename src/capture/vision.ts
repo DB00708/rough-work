@@ -234,3 +234,50 @@ export function bandHeight(b: Band): number {
 export function bandOverlap(a: Band, b: Band): number {
   return Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) + 1);
 }
+
+/** Pixelwise OR of two masks. */
+export function orMask(a: Mask, b: Mask): Mask {
+  const out = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = a[i] | b[i];
+  return out;
+}
+
+/**
+ * Height in rows of the tallest 8-connected ink blob. Handwritten characters
+ * are short; the outline of a hand or an arm has long connected edges.
+ */
+export function maxComponentHeight(mask: Mask, w: number, h: number): number {
+  const seen = new Uint8Array(mask.length);
+  const stack = new Int32Array(mask.length);
+  let best = 0;
+  for (let start = 0; start < mask.length; start++) {
+    if (!mask[start] || seen[start]) continue;
+    let top = 0;
+    stack[top++] = start;
+    seen[start] = 1;
+    let minY = h;
+    let maxY = -1;
+    while (top > 0) {
+      const i = stack[--top];
+      const y = (i / w) | 0;
+      const x = i - y * w;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= w) continue;
+          const j = yy * w + xx;
+          if (mask[j] && !seen[j]) {
+            seen[j] = 1;
+            stack[top++] = j;
+          }
+        }
+      }
+    }
+    best = Math.max(best, maxY - minY + 1);
+  }
+  return best;
+}

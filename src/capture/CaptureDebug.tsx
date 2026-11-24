@@ -71,7 +71,8 @@ export function CaptureDebug({ detector, refreshMs = 250 }: CaptureDebugProps) {
       style={{ font: '12px ui-monospace, monospace', padding: 8, border: '1px solid #8884', borderRadius: 6 }}
     >
       <div style={{ marginBottom: 6 }}>
-        status <b>{snap.status}</b> · still {snap.stillCount} · change {(snap.lastChange * 100).toFixed(2)}% · lines{' '}
+        status <b>{snap.status}</b>
+        {snap.obstruction ? ` (${snap.obstruction})` : ''} · still {snap.stillCount} · change {(snap.lastChange * 100).toFixed(2)}% · lines{' '}
         {snap.linesEmitted} · mask {snap.procWidth}×{snap.procHeight}
       </div>
       <div style={row}>
