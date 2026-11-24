@@ -11,7 +11,7 @@ Each task owns only its files. Other tasks import these exports by the exact nam
 | T3 capture | `src/capture/*` | `useCamera()`, `createLineDetector(opts)` returning `{ onFrame(video), forceLineDone() }` that emits `{ cropDataUrl, bbox }` once per new line, `FrameGuide` component |
 | T4 cloud explain | `src/explain.ts`, `src/speech.ts`, `src/quota.ts` | `explainMistake({prev, next, prevCrop?, nextCrop?}, cfg): Promise<Explanation>`, `speak(text, lang)`, `canCallCloud(uid, cfg): Promise<boolean>`, `recordCloudCall(uid)` |
 | T5 data | `src/data/*`, `firestore.rules`, `firestore.indexes.json`, `src/pages/Mistakes.tsx` | `startSession(uid, problemText)`, `updateSessionCounts(uid, sid, counts)`, `logMistake(uid, sid, line, prev, explanation)`, `listMyMistakes(uid)`, `listCommonMistakes()` |
-| T6 config + deploy | `src/config.ts`, `firebase.json`, `.firebaserc`, `remoteconfig.template.json`, `README.md`, `LICENSE` | `DEFAULT_CONFIG: AppConfig`, `loadConfig(): Promise<AppConfig>` |
+| T6 config + deploy | `src/config.ts`, `src/config.test.ts`, `docs/SETUP.md`, `firebase.json`, `.firebaserc`, `remoteconfig.template.json`, `README.md`, `LICENSE` | `DEFAULT_CONFIG: AppConfig`, `loadConfig(): Promise<AppConfig>` |
 | T7 practice screen | `src/pages/Practice.tsx`, `src/pipeline.ts`, `src/components/*`, `src/App.tsx`, `src/main.tsx`, CSS | `usePipeline()` orchestrating read → check → explain → log; routes `/`, `/practice`, `/mistakes`, `/spike` |
 
 Routing rules (PRD section 4), implemented in `src/pipeline.ts`:
