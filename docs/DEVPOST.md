@@ -1,6 +1,14 @@
 # Devpost submission text
 
-Paste each section into the matching Devpost field. Before you submit, update the numbers in "Accomplishments" and the live URL if they changed.
+Paste each section into the matching Devpost field. Lines marked **VERIFY BEFORE SUBMIT** depend on tests or deploys that are not done yet. Check them, then remove the marker.
+
+## Links and form fields
+
+- **Platform:** Web (Chrome)
+- **Hosted app:** https://rough-work-81b7f.web.app (VERIFY BEFORE SUBMIT: deployed and works in a clean Chrome profile)
+- **Repository:** <GitHub repo URL> (public, Apache 2.0 visible in the About section)
+- **Demo video:** <YouTube URL> (public, under 3:00, English subtitles)
+- **Testing instructions:** paste from [docs/TESTING.md](TESTING.md), or link to it in the repo.
 
 ## Name
 
@@ -19,11 +27,11 @@ We wanted a tutor that sits beside the notebook, stays quiet while the work is r
 ## What it does
 
 - You point a webcam at your notebook and solve a problem on paper.
-- Rough Work finds each new line you write, reads it, and checks that it follows from the line before it.
-- A correct line turns green. A wrong line turns red. A line it cannot read with confidence turns amber ("unsure"), so a bad read does not become a false red flag.
+- Rough Work finds each new line when you pause (or press Space), reads it, and checks that it follows from your last correct line.
+- A correct line turns green. A wrong line turns red. A line that the app cannot read or parse, or that two reads disagree on, turns amber ("unsure"), so a bad read does not become a false red flag. A low-confidence read is first re-read in the cloud.
 - For a red line, it gives a short explanation in Hinglish (with an English toggle), a hint ladder (nudge, method, answer) and a mistake type. A button reads the explanation aloud.
 - You can click any line and fix what was read. The app checks it again.
-- The **My mistakes** page lists your recent mistakes and the most common mistake types.
+- The **My mistakes** page lists your recent mistakes, and the most common mistake types across all users.
 - A hybrid meter in the top bar shows on-device reads, cloud calls and the ratio between them.
 - Demo mode plays a sample problem with one sign error, for people without a webcam.
 
@@ -32,7 +40,7 @@ We wanted a tutor that sits beside the notebook, stays quiet while the work is r
 - **Frontend:** Vite, React 19 and TypeScript.
 - **Capture:** `getUserMedia` and a canvas frame diff inside a guide box that the student fits to the page. When the student pauses, the app crops only the new line to a JPEG. The Space key sends a line at once.
 - **Read:** Firebase AI Logic with `InferenceMode.PREFER_ON_DEVICE`. Gemini Nano reads the crop in Chrome and returns JSON `{latex, plain, confidence}` through a response schema.
-- **Check:** nerdamer, a JavaScript computer algebra system, tests whether line N is equivalent to line N-1. It simplifies the difference and, as a backup, compares both sides at sample points.
+- **Check:** a deterministic step checker compares the new line with the last correct line. For expressions, it compares values at test points, with nerdamer's `expand()` of the difference as a backup. For equations, it checks whether one equation is a constant multiple of the other, then compares real solution sets. A partial answer (one root of two) is accepted. Anything it cannot judge is "unsure", never red.
 - **Explain:** Firebase AI Logic with `InferenceMode.ONLY_IN_CLOUD` and `gemini-3.5-flash-lite`. The model returns structured JSON with a mistake type from a fixed list.
 - **Firebase:** Anonymous Auth, Firestore (text-only mistake log), Remote Config (prompts, thresholds, daily cloud cap, model name), App Check with reCAPTCHA Enterprise, and Hosting.
 
@@ -46,21 +54,21 @@ The device reads every line. Code judges every line. The cloud speaks only when 
 |---|---|---|
 | Gemini Nano, on device | Every new line | Reads the handwriting |
 | nerdamer, in code | After every read | Decides right or wrong. The result is deterministic. |
-| Gemini, in the cloud | Only on a wrong step or an unsure read | Explains the mistake in Hinglish, gives hints, names the mistake type |
+| Gemini, in the cloud | Only on a wrong step or a low-confidence read | Explains the mistake in Hinglish, gives hints, names the mistake type. Re-reads a low-confidence line. |
 
 Routing rules:
 
 1. Read with `PREFER_ON_DEVICE`. If Nano is not available, read in the cloud at a slower pace and show a "cloud mode" badge.
 2. If Nano's confidence is below a threshold (Remote Config, default 0.6), re-read that crop once in the cloud.
-3. Before a line turns red, Nano reads it a second time. Two reads must agree.
+3. Before a line turns red, Nano reads it a second time. Two reads must agree. (Skipped in cloud mode and for lines fixed by hand.)
 4. If the checker cannot parse a line, mark it "unsure". Do not call the cloud.
 5. A daily cap on cloud calls per user (Remote Config, default 50).
 
 ## Why hybrid is essential
 
 - **Cost.** A 2-hour practice session can have hundreds of line reads. Sending each one to the cloud would cost too much for a free student tool. On the device, reads cost nothing. The cloud runs only for the few lines that are wrong.
-- **Latency.** The red flag needs no network round trip. The student sees it while the pen is still on that line.
-- **Privacy.** The camera looks into a minor's room. Full webcam frames never leave the device and are never stored. With Nano, a single line crop goes to the cloud only when a step is wrong or a read is unsure.
+- **Latency.** The red flag needs no network round trip. The student sees it a few seconds after finishing the line, before the next step.
+- **Privacy.** The camera looks into a minor's room. Full webcam frames never leave the device and are never stored. With Nano, line crops go to the cloud only for a wrong step (the wrong line and the last correct line) or a low-confidence read (that line). Without Nano, the app shows a "cloud mode" badge and every line crop goes to the cloud for reading.
 - **Bad Wi-Fi.** Hostel and home Wi-Fi in India drops often. With Nano, reading and checking work with Wi-Fi off. Only the explanation waits for the network.
 
 The language model never decides if the maths is right. It reads handwriting on the device and explains in the cloud. The verdict comes from code.
@@ -74,8 +82,8 @@ The language model never decides if the maths is right. It reads handwriting on 
 
 ## Accomplishments that we're proud of
 
-- The full loop works: capture, on-device read, deterministic check, cloud explanation, mistake log.
-- Warm Nano reads take about 2 s in our first tests (typed-font images, Chrome 158).
+- The full loop is built: capture, on-device read, deterministic check, cloud explanation, mistake log. (VERIFY BEFORE SUBMIT: run it end to end on the hosted app with Firestore rules deployed.)
+- First measurements on typed-font images, Chrome 158: warm Nano read about 2 s, cloud read 4.3 s, cloud explanation 7.2 s. Accuracy on real handwriting is not measured yet. (VERIFY BEFORE SUBMIT: add the handwriting score and the new explanation time.)
 - Cloud calls are rare by design, and the hybrid meter shows the ratio live.
 - Webcam frames never leave the device or get stored.
 

@@ -38,7 +38,7 @@ If Chrome cannot run Gemini Nano, the app reads lines in the cloud and shows a *
    - `3x - 2x = 4 - 6` (wrong on purpose)
 6. After each line, move your hand out of the box and pause, or press **Space** ("Line done").
 7. Expect: each line shows its transcription and a **cloud** badge. Lines 1 and 2 turn green. Line 3 turns red, then a Hinglish explanation and hints appear.
-8. Write the corrected line `3x - 2x = 4 + 6`. It is checked against line 2 and turns green.
+8. Write the corrected line `3x - 2x = 4 + 6`. It is checked against line 2 (the last correct line) and turns green.
 9. Click **My mistakes** (from the home page). Expect the mistake from line 3.
 
 In cloud mode, each line crop goes to the cloud for reading. Full webcam frames never leave the device.
@@ -50,13 +50,13 @@ In cloud mode, each line crop goes to the cloud for reading. Full webcam frames 
 1. Use Chrome desktop 139 or later, on a machine with 16 GB RAM (or a GPU with more than 4 GB VRAM) and about 22 GB free disk.
 2. Open `chrome://flags/#prompt-api-for-gemini-nano-multimodal-input`. Set it to **Enabled**. Restart Chrome.
 3. Open the hosted app and go to `/spike` (or click **Spike (dev)** on the home page).
-4. Click **Download Gemini Nano**. Wait until it shows 100% and "On-device model: **available**". The download is large and can take a long time.
+4. Click **Download Gemini Nano**. Wait until it shows "On-device model: **available**". The download is large and can take a long time.
 
 ### Test the loop
 
 1. Open the hosted app with Wi-Fi on. Click **Start practice**. Check that there is **no** "cloud mode" badge.
 2. Follow steps 2 to 8 of path B.
-3. Expect: lines show a **device** badge. A red line appears in about 2 to 3 s after the line is sent. The first read after a page load can take about 20 s while Nano starts.
+3. Expect: lines show a **device** badge. A wrong line turns red a few seconds after it is sent (Nano reads it twice before the red flag). The first read after a page load can take about 20 s while Nano starts.
 4. Expect: the meter in the top bar counts **on-device reads** for every line and a **cloud call** only for the explanation.
 
 ### Wi-Fi off test
@@ -74,18 +74,22 @@ In cloud mode, each line crop goes to the cloud for reading. Full webcam frames 
 | Green (OK) | The step follows from the last correct line. |
 | Red (wrong) | The step does not follow. With Nano, two reads agreed before the line turned red. |
 | Amber (unsure) | The app could not read or parse the line, or two reads disagreed. Click the line and type the correct text. |
-| **device** / **cloud** / **typed** badge | Where the line was read. **typed** is a demo or hand-fixed line. |
+| **device** / **cloud** / **typed** badge | Where the line was read. **typed** is a demo line (no camera crop). A line you fixed by hand shows **device · fixed** or **cloud · fixed**. |
 | **cloud mode** badge | Nano is not available. Every line is read in the cloud. |
 
 Limits:
 
 - One problem at a time. Click **New** to start the next problem. The meter resets for each problem.
 - Algebra lines only (no geometry, graphs or word problems).
-- A daily cap of 50 cloud calls per user. At the cap, lines that need the cloud turn amber, and you can fix them by hand.
+- A daily cap of 50 cloud calls per user. At the cap, a wrong step stays red with "No explanation yet (offline or daily limit)", and a low-confidence read is not re-read in the cloud. In cloud mode, new lines turn amber, and you can fix them by hand.
 - Handwriting accuracy depends on the pen, light and camera angle. Neat, large writing works best.
 
 ## Privacy
 
 - No webcam frame is stored.
-- Line crops stay in memory. A crop goes to the cloud for a wrong step, a low-confidence read, or every read in cloud mode.
-- Firestore stores text only: the two lines around each mistake and the explanation.
+- Line crops stay in memory. Crops go to the cloud only:
+  - for a wrong step: the wrong line and the last correct line,
+  - for a low-confidence read: that line,
+  - in cloud mode: every line.
+- Firestore stores text only, under an anonymous user ID: the problem text you type, session counts, and for each explained mistake the two lines and the explanation.
+- A shared count per mistake type is readable by every signed-in user. It has no user ID and no lines. The **Common mistakes** list on **My mistakes** comes from these counts.
