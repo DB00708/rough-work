@@ -78,12 +78,12 @@ The language model never decides if the maths is right. It reads handwriting on 
 - **Finding a "new line" in a webcam feed.** Hands, shadows and small camera moves all change pixels. We diff frames inside a guide box, wait for the writing to settle, and added the Space key as a manual "line done".
 - **Turning handwriting into maths that a CAS can parse.** LaTeX from a model often does not parse. We ask Nano for a second field, plain ASCII maths with explicit `*`, and use that for the check.
 - **False red flags.** A misread looks like a maths error. We added the two-read rule, the "unsure" state in amber, and the fix-it edit.
-- **Cloud explanation speed.** Our first measurement was 7.2 s against a 5 s target. We are shortening the prompt and output.
+- **Cloud explanation speed.** Our first measurement was 7.2 s against a 5 s target. A shorter prompt, Hinglish-only output, a token cap and text-only input brought the median to 2.0 s.
 
 ## Accomplishments that we're proud of
 
 - The full loop is built: capture, on-device read, deterministic check, cloud explanation, mistake log. (VERIFY BEFORE SUBMIT: run it end to end on the hosted app with Firestore rules deployed.)
-- First measurements on typed-font images, Chrome 158: warm Nano read about 2 s, cloud read 4.3 s, cloud explanation 7.2 s. Accuracy on real handwriting is not measured yet. (VERIFY BEFORE SUBMIT: add the handwriting score and the new explanation time.)
+- Measurements on typed-font images, Chrome 158: warm Nano read about 2 s, cloud read 4.3 s, cloud Hinglish explanation 1.6 to 2.4 s (median 2.0 s over 5 runs). Accuracy on real handwriting is not measured yet. (VERIFY BEFORE SUBMIT: add the handwriting score.)
 - Cloud calls are rare by design, and the hybrid meter shows the ratio live.
 - Webcam frames never leave the device or get stored.
 

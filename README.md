@@ -97,7 +97,7 @@ First measurements, Chrome 158, typed-font test images. Real handwriting is not 
 | Nano read, first call (cold) | 19.7 s | one time per page load |
 | Cloud read | 4.3 s | cloud mode only |
 | Time to flag a wrong step | not measured yet; a red flag needs two Nano reads, so expect about 4 s or more | under 3 s |
-| Cloud explanation | 7.2 s; being optimised | under 5 s |
+| Cloud explanation | 1.6 to 2.4 s (median 2.0 s, 5 runs) | under 5 s |
 | Handwriting accuracy | pending | 14 of 20 neat lines |
 
 ## Tech stack

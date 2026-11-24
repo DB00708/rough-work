@@ -48,3 +48,8 @@ All of T1–T7 merged; main builds, 252 tests pass.
 - T8 fixes (explain < 5 s, Hinglish hints, quota fail-closed, taxonomy): assigned 04:06 to t4-coder-explain (local_44659a34-32ef-4a11-a5a4-ac0653ca91cb), branch task/T8-fixes. Reviewer: t4-reviewer (local_51e01654-8078-412d-beba-b85a35d3d8cb).
 - T9 docs (README, DEVPOST, DEMO_SCRIPT, TESTING): assigned 04:06 to t6-coder-config (local_19ee461a-00a0-4203-af28-56207ab4a8e9), branch task/T9-docs. Reviewer: t6-reviewer (local_43723da3-f191-40d2-9d3f-761dcd34966c).
 Rule learned: automated turns (session notes, scheduled runs) cannot start sessions; reuse idle reviewer sessions with SendMessage instead.
+
+## Phase 2 merged (Nov 25 ~05:00)
+- T8 merged @c0ff73d, T9 merged @4cb0f32. main: build OK, 283 tests.
+- Live re-measure (Chrome 158): cloud explain 1593–2439 ms, median 1959 ms over 5 cases, all hints Hinglish, mistake types correct. Target < 5 s met.
+- Remaining: Day 1 handwriting test (user's 20 photos), deploy (needs `npx firebase-tools@15.37.0 login` by the user), clean-profile hosted test, video, Devpost submit.
