@@ -218,7 +218,8 @@ describe('loadConfig', () => {
     void loadConfig().then((c) => (done = c));
     // Let the dynamic import and isSupported() settle (real macrotasks).
     const tick = () => new Promise<void>((r) => (globalThis as unknown as { setImmediate: (f: () => void) => void }).setImmediate(r));
-    for (let i = 0; i < 100 && !started; i++) await tick();
+    const deadline = Date.now() + 5000; // Date is not faked
+    while (!started && Date.now() < deadline) await tick();
     expect(started).toBe(true);
     await vi.advanceTimersByTimeAsync(2999);
     expect(done).toBeNull();
