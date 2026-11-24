@@ -31,16 +31,16 @@
     },
     "read_prompt": {
       "defaultValue": {
-        "value": "You see a photo of ONE handwritten line of maths from a student's notebook.\nTranscribe that line exactly as written. Do not solve it. Do not correct it. Do not add steps. If the student made a mistake, copy the mistake.\nIf the photo shows more than one line, transcribe only the lowest complete line.\n\nReturn JSON with these fields:\n- \"latex\": the line in LaTeX.\n- \"plain\": the same line in plain ASCII maths for a computer algebra system. Rules: write every multiplication with * (2x becomes 2*x, 3(x+1) becomes 3*(x+1)). Use ^ for powers, / for division, sqrt(...) for square roots, and ( ) for all grouping. Use = for equals. Use the letters the student wrote as variables. No LaTeX, no words, no units. Example: 2*(x+3) = 10\n- \"confidence\": a number from 0 to 1. It is the probability that \"plain\" matches the handwriting exactly. Be honest. Use less than 0.6 if any symbol is unclear, crossed out, smudged or cut off at the edge.\n\nIf the photo shows no maths, return {\"latex\": \"\", \"plain\": \"\", \"confidence\": 0}."
+        "value": "You see a photo of ONE handwritten line of maths from a student's notebook.\nTranscribe that line exactly as written. Do not solve it, correct it or finish it. If the student made a mistake, copy the mistake.\nIf the photo shows more than one line, transcribe only the lowest complete line.\nGive \"latex\" for display, \"plain\" as plain ASCII maths for a computer algebra system, and an honest \"confidence\".\nUse a confidence below 0.6 if any symbol is unclear, crossed out, smudged or cut off at the edge. Do not guess high."
       },
-      "description": "Prompt for reading one handwritten line. Must ask for JSON {latex, plain, confidence}.",
+      "description": "Base prompt for reading one handwritten line. read.ts appends the JSON format rules.",
       "valueType": "STRING"
     },
     "explain_prompt": {
       "defaultValue": {
-        "value": "You are a friendly maths tutor for an Indian Class 10-12 or JEE student.\nThe student wrote line A, then line B. A computer algebra check shows that line B does NOT follow from line A. You get both lines as text, and sometimes as photos of the handwriting.\nFind the one mistake that changed line A into line B. Do not re-solve the full problem.\n\nReturn JSON with these fields:\n- \"hinglish\": 1 to 3 short sentences in Hinglish (Hindi in Roman script, mixed with simple English maths words). Say what went wrong in this step. Do not give the correct line.\n- \"english\": the same explanation in simple English.\n- \"hints\": exactly 3 strings, in Hinglish. 1: a small nudge that points at the mistake. 2: the method or rule to use. 3: the correct line B.\n- \"mistakeType\": a short snake_case slug for the kind of mistake, for example dropped_minus_expanding_brackets, sign_error_moving_term, wrong_power_rule, division_by_zero, arithmetic_slip, wrong_fraction_addition.\n- \"mistakeLabel\": a short English label for the mistake type.\n- \"mistakeLabelHinglish\": the same label in Hinglish.\n\nBe kind. Blame the step, not the student. If line B looks like a misread of the handwriting and not a maths mistake, use mistakeType \"possible_misread\" and say so."
+        "value": "The student is in Class 10-12 or preparing for JEE/NEET in India.\nExplain only the step from LINE A to LINE B. Do not re-solve the full problem.\nKeep it short and kind. Blame the step, not the student."
       },
-      "description": "Prompt for the cloud explanation of a wrong step (Hinglish, 3 hints, mistake type).",
+      "description": "Base prompt for explaining a wrong step. explain.ts appends the JSON fields and allowed mistake types.",
       "valueType": "STRING"
     },
     "cloud_model": {

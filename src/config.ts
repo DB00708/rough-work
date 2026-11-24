@@ -7,30 +7,18 @@
 import { getApp, getApps } from 'firebase/app';
 import type { AppConfig } from './types';
 
+// These are base prompts. read.ts appends READ_FORMAT_RULES and explain.ts
+// appends EXPLAIN_PROMPT (JSON fields, allowed mistake slugs). Keep output
+// format rules out of these, so a Remote Config edit cannot break parsing.
 const READ_PROMPT = `You see a photo of ONE handwritten line of maths from a student's notebook.
-Transcribe that line exactly as written. Do not solve it. Do not correct it. Do not add steps. If the student made a mistake, copy the mistake.
+Transcribe that line exactly as written. Do not solve it, correct it or finish it. If the student made a mistake, copy the mistake.
 If the photo shows more than one line, transcribe only the lowest complete line.
+Give "latex" for display, "plain" as plain ASCII maths for a computer algebra system, and an honest "confidence".
+Use a confidence below 0.6 if any symbol is unclear, crossed out, smudged or cut off at the edge. Do not guess high.`;
 
-Return JSON with these fields:
-- "latex": the line in LaTeX.
-- "plain": the same line in plain ASCII maths for a computer algebra system. Rules: write every multiplication with * (2x becomes 2*x, 3(x+1) becomes 3*(x+1)). Use ^ for powers, / for division, sqrt(...) for square roots, and ( ) for all grouping. Use = for equals. Use the letters the student wrote as variables. No LaTeX, no words, no units. Example: 2*(x+3) = 10
-- "confidence": a number from 0 to 1. It is the probability that "plain" matches the handwriting exactly. Be honest. Use less than 0.6 if any symbol is unclear, crossed out, smudged or cut off at the edge.
-
-If the photo shows no maths, return {"latex": "", "plain": "", "confidence": 0}.`;
-
-const EXPLAIN_PROMPT = `You are a friendly maths tutor for an Indian Class 10-12 or JEE student.
-The student wrote line A, then line B. A computer algebra check shows that line B does NOT follow from line A. You get both lines as text, and sometimes as photos of the handwriting.
-Find the one mistake that changed line A into line B. Do not re-solve the full problem.
-
-Return JSON with these fields:
-- "hinglish": 1 to 3 short sentences in Hinglish (Hindi in Roman script, mixed with simple English maths words). Say what went wrong in this step. Do not give the correct line.
-- "english": the same explanation in simple English.
-- "hints": exactly 3 strings, in Hinglish. 1: a small nudge that points at the mistake. 2: the method or rule to use. 3: the correct line B.
-- "mistakeType": a short snake_case slug for the kind of mistake, for example dropped_minus_expanding_brackets, sign_error_moving_term, wrong_power_rule, division_by_zero, arithmetic_slip, wrong_fraction_addition.
-- "mistakeLabel": a short English label for the mistake type.
-- "mistakeLabelHinglish": the same label in Hinglish.
-
-Be kind. Blame the step, not the student. If line B looks like a misread of the handwriting and not a maths mistake, use mistakeType "possible_misread" and say so.`;
+const EXPLAIN_PROMPT = `The student is in Class 10-12 or preparing for JEE/NEET in India.
+Explain only the step from LINE A to LINE B. Do not re-solve the full problem.
+Keep it short and kind. Blame the step, not the student.`;
 
 export const DEFAULT_CONFIG: AppConfig = {
   frameIntervalMs: 8000,
@@ -183,6 +171,8 @@ export function loadConfig(): Promise<AppConfig> {
       return cfg ?? DEFAULT_CONFIG;
     },
     (e: unknown) => {
+      // Unexpected SDK error (not a slow or failed fetch, which fetchConfig
+      // handles). Defaults stay cached for the rest of this page load.
       console.warn('[config] Remote Config unavailable, using defaults:', e);
       return DEFAULT_CONFIG;
     },

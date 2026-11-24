@@ -1,4 +1,27 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Controllable fakes for the Firebase SDK. getValue returns the remote value
+// when set, else the in-app default, like the real SDK.
+const m = vi.hoisted(() => ({
+  apps: [] as unknown[],
+  supported: true,
+  fetchAndActivate: (() => Promise.resolve(true)) as () => Promise<boolean>,
+  remote: {} as Record<string, string>,
+  rc: null as null | { settings: Record<string, number>; defaultConfig: Record<string, string> },
+  getRemoteConfigCalls: 0,
+}));
+vi.mock('firebase/app', () => ({ getApps: () => m.apps, getApp: () => ({}) }));
+vi.mock('firebase/remote-config', () => ({
+  isSupported: () => Promise.resolve(m.supported),
+  getRemoteConfig: () => {
+    m.getRemoteConfigCalls++;
+    m.rc = { settings: {}, defaultConfig: {} };
+    return m.rc;
+  },
+  fetchAndActivate: () => m.fetchAndActivate(),
+  getValue: (_rc: unknown, key: string) => ({ asString: () => m.remote[key] ?? m.rc?.defaultConfig[key] ?? '' }),
+}));
+
 import templateText from '../remoteconfig.template.json?raw';
 import {
   DEFAULT_CONFIG,
@@ -111,10 +134,9 @@ describe('DEFAULT_CONFIG prompts', () => {
       expect(DEFAULT_CONFIG.readPrompt).toContain(`"${field}"`);
     }
   });
-  it('explain prompt asks for every Explanation field', () => {
-    for (const field of ['hinglish', 'english', 'hints', 'mistakeType', 'mistakeLabel', 'mistakeLabelHinglish']) {
-      expect(DEFAULT_CONFIG.explainPrompt).toContain(`"${field}"`);
-    }
+  it('explain prompt leaves the output format to explain.ts', () => {
+    // explain.ts appends the JSON fields and the allowed slug list.
+    expect(DEFAULT_CONFIG.explainPrompt).not.toMatch(/mistakeType|mistakeLabel|JSON/);
   });
 });
 
@@ -135,8 +157,81 @@ describe('remoteconfig.template.json', () => {
 });
 
 describe('loadConfig', () => {
-  it('returns defaults when no Firebase app is initialized', async () => {
+  beforeEach(() => {
     resetConfigCache();
+    m.apps = [{}];
+    m.supported = true;
+    m.fetchAndActivate = () => Promise.resolve(true);
+    m.remote = {};
+    m.rc = null;
+    m.getRemoteConfigCalls = 0;
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('returns defaults without caching when no Firebase app is initialized', async () => {
+    m.apps = [];
+    await expect(loadConfig()).resolves.toEqual(DEFAULT_CONFIG);
+    expect(m.getRemoteConfigCalls).toBe(0);
+    m.apps = [{}];
+    m.remote = { daily_cloud_cap: '7' };
+    expect((await loadConfig()).dailyCloudCap).toBe(7);
+  });
+
+  it('sets defaults, timeout and fetch interval, then parses remote values', async () => {
+    m.remote = { confidence_threshold: '0.8', frame_interval_ms: '1' };
+    const cfg = await loadConfig();
+    expect(cfg.confidenceThreshold).toBe(0.8);
+    expect(cfg.frameIntervalMs).toBe(DEFAULT_CONFIG.frameIntervalMs); // out of bounds
+    expect(m.rc?.defaultConfig).toEqual(toRemoteDefaults());
+    expect(m.rc?.settings.fetchTimeoutMillis).toBe(3000);
+    expect([60_000, 3_600_000]).toContain(m.rc?.settings.minimumFetchIntervalMillis);
+  });
+
+  it('caches the result for the page load', async () => {
+    await loadConfig();
+    await loadConfig();
+    expect(m.getRemoteConfigCalls).toBe(1);
+  });
+
+  it('uses defaults when Remote Config is not supported', async () => {
+    m.supported = false;
+    await expect(loadConfig()).resolves.toEqual(DEFAULT_CONFIG);
+  });
+
+  it('uses defaults when the fetch fails', async () => {
+    m.fetchAndActivate = () => Promise.reject(new Error('offline'));
+    await expect(loadConfig()).resolves.toEqual(DEFAULT_CONFIG);
+  });
+
+  it('stops waiting after 3 s when the fetch hangs', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let started = false;
+    m.fetchAndActivate = () => {
+      started = true;
+      return new Promise<boolean>(() => {});
+    };
+    let done: unknown = null;
+    void loadConfig().then((c) => (done = c));
+    // Let the dynamic import and isSupported() settle (real macrotasks).
+    const tick = () => new Promise<void>((r) => (globalThis as unknown as { setImmediate: (f: () => void) => void }).setImmediate(r));
+    for (let i = 0; i < 100 && !started; i++) await tick();
+    expect(started).toBe(true);
+    await vi.advanceTimersByTimeAsync(2999);
+    expect(done).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(done).toEqual(DEFAULT_CONFIG);
+  });
+
+  it('uses defaults when the SDK throws', async () => {
+    m.supported = true;
+    m.fetchAndActivate = () => {
+      throw new Error('boom');
+    };
+    // A sync throw inside fetchAndActivate is caught like a failed fetch.
     await expect(loadConfig()).resolves.toEqual(DEFAULT_CONFIG);
   });
 });

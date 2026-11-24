@@ -99,7 +99,7 @@ If you skip this step, the app still works. It uses the defaults in `src/config.
 ### 7a. Create the reCAPTCHA Enterprise key
 
 - [ ] Open <https://console.cloud.google.com/security/recaptcha>. At the top, select the same project as the Firebase project.
-- [ ] If asked, click **Enable** for the reCAPTCHA Enterprise API. If Google Cloud asks for a billing account, link one (the $300 credit account is fine). The free tier covers this app.
+- [ ] If asked, click **Enable** for the reCAPTCHA Enterprise API. If Google Cloud asks for a billing account, link one (the $300 credit account is fine).
 - [ ] Click **Create key**.
 - [ ] Display name: `rough-work-web`. Platform: **Website**.
 - [ ] Domains: add `localhost`, `<project-id>.web.app` and `<project-id>.firebaseapp.com`.
@@ -133,6 +133,7 @@ The debug token lets `localhost` pass App Check. It is a secret. Do this step yo
 ## 9. Set up Hosting
 
 - [ ] Open **Build** > **Hosting**. Click **Get started**.
+- [ ] Check that `firestore.rules` and `firestore.indexes.json` exist in the repo. If not, deploy with `--only hosting,remoteconfig` for now.
 - [ ] Click **Next** through the CLI install and init steps. The repo already has `firebase.json` and `.firebaserc`, and the CLI runs through `npx`.
 - [ ] Click **Continue to console**.
 - [ ] In the repo, run:
@@ -150,7 +151,8 @@ The debug token lets `localhost` pass App Check. It is a secret. Do this step yo
 Do this only after the hosted app and `localhost` both work.
 
 - [ ] Open **Build** > **App Check** > **APIs** tab.
-- [ ] Open **Firebase AI Logic** (it can be listed as **Generative Language API**). Check that most requests in the metrics are **Verified**.
+- [ ] Find the entry for the Gemini API that AI Logic uses (the label can be **Firebase AI Logic** or **Gemini Developer API**). Open its metrics. Check that most requests are **Verified**.
+- [ ] If there is no such entry, AI Logic is not enforced from this page. Check the AI Logic page (**Build** > **AI Logic** > **Settings**) for an App Check option.
 - [ ] Click **Enforce**, then **Confirm**.
 - [ ] Do the same for **Cloud Firestore**.
 - [ ] Reload the app on `localhost` and on the hosted URL. Check that reads and explanations still work.

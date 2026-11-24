@@ -10,6 +10,8 @@ Built for #BuildHybridAI 2026 with Firebase AI Logic and Gemini Nano in Chrome.
 
 The device reads every line. Code judges every line. The cloud speaks only when a line is wrong.
 
+This is the normal mode, with Gemini Nano on the device. Without Nano, the app runs in cloud mode (see the routing rules below).
+
 ```mermaid
 flowchart LR
     A[Webcam frame<br/>paper on the desk] --> B[Crop new line<br/>frame diff, JPEG]
@@ -44,8 +46,8 @@ Routing rules:
 |---|---|
 | Cost | A 2-hour session has about 900 line reads. On device, they cost nothing. The cloud runs only for the few wrong lines. |
 | Latency | A wrong step is flagged in under 3 seconds with no network round trip. |
-| Privacy | The camera sees a minor's room. Frames stay on the device. Only a line crop leaves the device, and only when a step is wrong or a read is unsure. |
-| Bad Wi-Fi | Hostel Wi-Fi drops. Reading and checking work with Wi-Fi off. Only the explanation needs the network. |
+| Privacy | The camera sees a minor's room. Full frames never leave the device. With Nano, a line crop leaves the device only when a step is wrong or a read is unsure. In cloud mode (no Nano), every line crop goes to the cloud. |
+| Bad Wi-Fi | Hostel Wi-Fi drops. With Nano on the device, reading and checking work with Wi-Fi off. Only the explanation needs the network. Without Nano, reading needs the network too. |
 
 ## The hybrid meter
 
@@ -54,7 +56,11 @@ The practice screen shows a live counter, for example `on-device reads: 47 · cl
 ## Privacy
 
 - No webcam frame is stored. Not on the device, not in the cloud.
-- Line crops stay in memory. A crop goes to the cloud only on a wrong step or a low-confidence read.
+- Line crops stay in memory. A crop goes to the cloud in these cases only:
+  - the step is wrong (for the explanation),
+  - the on-device read has low confidence (one cloud re-read),
+  - the app is in cloud mode because Nano is not available. Then every line crop goes to the cloud for reading. The "cloud mode" badge shows this.
+- Full webcam frames never leave the device.
 - Firestore stores text only: session counts and mistake types with the two transcribed lines.
 - Sign-in is Anonymous Auth. The app asks for no name, email or phone number.
 
@@ -130,8 +136,8 @@ The app reads these values from Remote Config. If Remote Config is not available
 | `cloud_frame_interval_ms` | 20000 | Integer, 2000 to 600000, never below `frame_interval_ms` |
 | `confidence_threshold` | 0.6 | 0 to 1 |
 | `daily_cloud_cap` | 50 | Integer, 0 to 10000 |
-| `read_prompt` | see `src/config.ts` | Non-empty text |
-| `explain_prompt` | see `src/config.ts` | Non-empty text |
+| `read_prompt` | see `src/config.ts` | Non-empty text. `read.ts` appends the JSON format rules. |
+| `explain_prompt` | see `src/config.ts` | Non-empty text. `explain.ts` appends the JSON fields and the allowed mistake types. |
 | `cloud_model` | `gemini-3.5-flash-lite` | A Gemini model name |
 
 The app fetches new values at most once per hour in production and once per minute in development. A fetch that takes more than 3 seconds is skipped.
@@ -155,6 +161,8 @@ npx firebase-tools@15.37.0 deploy --only hosting
 npx firebase-tools@15.37.0 deploy --only firestore
 npx firebase-tools@15.37.0 deploy --only remoteconfig
 ```
+
+Note: `firestore.rules` and `firestore.indexes.json` must exist before you deploy Firestore. If they are missing, `deploy` and `deploy --only firestore` fail. Use `--only hosting,remoteconfig` until they exist.
 
 Note: deploying `remoteconfig` replaces the template in the console. If you changed values in the console, update `remoteconfig.template.json` first.
 
@@ -190,6 +198,8 @@ Target: at least 14 of 20 neat lines read correctly.
 6. Open `/mistakes`. Check that the mistake type is in the list.
 
 ### Wi-Fi off test
+
+This test needs Gemini Nano on the device (Chrome flag on, model downloaded). In cloud mode, reading needs the network.
 
 1. Open `/practice` and let the page load fully.
 2. Turn Wi-Fi off.
