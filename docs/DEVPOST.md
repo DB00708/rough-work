@@ -5,7 +5,7 @@ Paste each section into the matching Devpost field. Lines marked **VERIFY BEFORE
 ## Links and form fields
 
 - **Platform:** Web (Chrome)
-- **Hosted app:** https://rough-work-81b7f.web.app (VERIFY BEFORE SUBMIT: deployed and works in a clean Chrome profile)
+- **Hosted app:** https://rough-work-81b7f.web.app (deployed Nov 25. VERIFY BEFORE SUBMIT: open it in a clean Chrome profile without Nano, expect the cloud mode badge)
 - **Repository:** <GitHub repo URL> (public, Apache 2.0 visible in the About section)
 - **Demo video:** <YouTube URL> (public, under 3:00, English subtitles)
 - **Testing instructions:** paste from [docs/TESTING.md](TESTING.md), or link to it in the repo.
@@ -82,7 +82,7 @@ The language model never decides if the maths is right. It reads handwriting on 
 
 ## Accomplishments that we're proud of
 
-- The full loop is built: capture, on-device read, deterministic check, cloud explanation, mistake log. (VERIFY BEFORE SUBMIT: run it end to end on the hosted app with Firestore rules deployed.)
+- The full loop is built: capture, on-device read, deterministic check, cloud explanation, mistake log. On the hosted app (Nov 25): Nano read, cloud Gemini through App Check, and the Firestore rules (own writes allowed, other users and image data denied) are checked. (VERIFY BEFORE SUBMIT: one full camera run on the hosted app that logs a mistake.)
 - Measurements on typed-font images, Chrome 158: warm Nano read about 2 s, cloud read 4.3 s, cloud Hinglish explanation 1.6 to 2.4 s (median 2.0 s over 5 runs). Accuracy on real handwriting is not measured yet. (VERIFY BEFORE SUBMIT: add the handwriting score.)
 - Cloud calls are rare by design, and the hybrid meter shows the ratio live.
 - Webcam frames never leave the device or get stored.

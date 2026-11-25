@@ -58,3 +58,9 @@ Rule learned: automated turns (session notes, scheduled runs) cannot start sessi
 - main @f8bd073: build OK, 283 tests pass. No open branches; all T1–T9 merged.
 - Firebase CLI not logged in. Started `npx firebase-tools@15.37.0 login` in terminal tab "firebase login"; waits on the user (consent prompts + Google sign-in).
 - After login: `npm run deploy:rules`, `npm run deploy:config`, `npm run deploy:hosting`, then test https://rough-work-81b7f.web.app in a clean Chrome profile.
+
+## Deploy (Nov 25 ~09:40)
+- Deployed: Firestore rules + indexes, Remote Config template, Hosting → https://rough-work-81b7f.web.app
+- Security fix: the App Check debug token was inlined into the first production bundle (`const env = import.meta.env` copied every VITE_ var). src/firebase.ts now reads `import.meta.env.X` directly; rebuilt, redeployed, 0 of 9 live JS files contain the token. Old token `local-dev` revoked; new token `local-dev-2` in `.env.local`.
+- Hosted checks: demo mode OK; /spike Nano read correct (cold 18.4 s); production App Check + anonymous auth + cloud Gemini OK (3.0 s); rules allow own session write, deny other-user write and `data:` strings.
+- Left: clean-profile (cloud mode) check, one camera run on hosted that logs a mistake, handwriting 20-photo gate, GitHub repo (user OK), video, submit.

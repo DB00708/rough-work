@@ -20,22 +20,25 @@ import {
 } from 'firebase/ai';
 import type { AppConfig } from './types';
 
-const env = import.meta.env;
-
 const firebaseConfig: FirebaseOptions = {
-  apiKey: env.VITE_FIREBASE_API_KEY,
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: env.VITE_FIREBASE_APP_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
 const REQUIRED_KEYS = ['VITE_FIREBASE_API_KEY', 'VITE_FIREBASE_PROJECT_ID', 'VITE_FIREBASE_APP_ID'] as const;
 
 /** Names of required env vars that are empty. */
 export function missingFirebaseEnv(): string[] {
-  return REQUIRED_KEYS.filter((k) => !env[k]);
+  const values: Record<(typeof REQUIRED_KEYS)[number], string | undefined> = {
+    VITE_FIREBASE_API_KEY: import.meta.env.VITE_FIREBASE_API_KEY,
+    VITE_FIREBASE_PROJECT_ID: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    VITE_FIREBASE_APP_ID: import.meta.env.VITE_FIREBASE_APP_ID,
+  };
+  return REQUIRED_KEYS.filter((k) => !values[k]);
 }
 
 /** True when the required Firebase env vars are set. */
@@ -69,9 +72,10 @@ declare global {
 
 function setUpAppCheck(): AppCheck | null {
   if (!isFirebaseConfigured() || typeof window === 'undefined') return null;
-  const siteKey = env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY;
-  if (env.DEV) {
-    const debug = env.VITE_APPCHECK_DEBUG_TOKEN;
+  const siteKey = import.meta.env.VITE_RECAPTCHA_ENTERPRISE_SITE_KEY;
+  // Read import.meta.env directly (not via `env`) so Vite drops the debug token from production bundles.
+  if (import.meta.env.DEV) {
+    const debug = import.meta.env.VITE_APPCHECK_DEBUG_TOKEN;
     // "true" (or empty) asks the SDK to print a debug token; any other value is a registered token.
     self.FIREBASE_APPCHECK_DEBUG_TOKEN = !debug || debug === 'true' ? true : debug;
   }
