@@ -53,3 +53,8 @@ Rule learned: automated turns (session notes, scheduled runs) cannot start sessi
 - T8 merged @c0ff73d, T9 merged @4cb0f32. main: build OK, 283 tests.
 - Live re-measure (Chrome 158): cloud explain 1593–2439 ms, median 1959 ms over 5 cases, all hints Hinglish, mistake types correct. Target < 5 s met.
 - Remaining: Day 1 handwriting test (user's 20 photos), deploy (needs `npx firebase-tools@15.37.0 login` by the user), clean-profile hosted test, video, Devpost submit.
+
+## 9:15 resume (Nov 25)
+- main @f8bd073: build OK, 283 tests pass. No open branches; all T1–T9 merged.
+- Firebase CLI not logged in. Started `npx firebase-tools@15.37.0 login` in terminal tab "firebase login"; waits on the user (consent prompts + Google sign-in).
+- After login: `npm run deploy:rules`, `npm run deploy:config`, `npm run deploy:hosting`, then test https://rough-work-81b7f.web.app in a clean Chrome profile.
