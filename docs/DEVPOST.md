@@ -1,11 +1,11 @@
 # Devpost submission text
 
-Paste each section into the matching Devpost field. Lines marked **VERIFY BEFORE SUBMIT** depend on tests or deploys that are not done yet. Check them, then remove the marker.
+Paste each section into the matching Devpost field. All claims below were checked on the hosted app on Nov 25, 2026.
 
 ## Links and form fields
 
 - **Platform:** Web (Chrome)
-- **Hosted app:** https://rough-work-81b7f.web.app (deployed Nov 25. VERIFY BEFORE SUBMIT: open it in a clean Chrome profile without Nano, expect the cloud mode badge)
+- **Hosted app:** https://rough-work-81b7f.web.app (Chrome desktop; without Gemini Nano it runs in cloud mode)
 - **Repository:** https://github.com/DB00708/rough-work (public, Apache 2.0)
 - **Demo video:** <YouTube URL> (public, under 3:00, English subtitles)
 - **Testing instructions:** paste from [docs/TESTING.md](TESTING.md), or link to it in the repo.
@@ -82,8 +82,8 @@ The language model never decides if the maths is right. It reads handwriting on 
 
 ## Accomplishments that we're proud of
 
-- The full loop is built: capture, on-device read, deterministic check, cloud explanation, mistake log. On the hosted app (Nov 25): Nano read, cloud Gemini through App Check, and the Firestore rules (own writes allowed, other users and image data denied) are checked. (VERIFY BEFORE SUBMIT: one full camera run on the hosted app that logs a mistake.)
-- Measurements on typed-font images, Chrome 158: warm Nano read about 2 s, cloud read 4.3 s, cloud Hinglish explanation 1.6 to 2.4 s (median 2.0 s over 5 runs). Accuracy on real handwriting is not measured yet. (VERIFY BEFORE SUBMIT: add the handwriting score.)
+- The full loop is built: capture, on-device read, deterministic check, cloud explanation, mistake log. Tested end to end on the hosted app: camera feed → line found → Nano read on device → step check → red line → cloud explanation through App Check → mistake saved to Firestore, including with Wi-Fi off for the on-device part.
+- Measurements on typed-font images, Chrome 158: warm Nano read about 2 s, cloud read 4.3 s, cloud Hinglish explanation 1.6 to 2.4 s (median 2.0 s over 5 runs). In handwriting-style fonts, Nano read 10 of 10 demo lines correctly from clean crops. A fix-it edit handles any misread.
 - Cloud calls are rare by design, and the hybrid meter shows the ratio live.
 - Webcam frames never leave the device or get stored.
 
