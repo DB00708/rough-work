@@ -375,6 +375,17 @@ describe('explainMistake late answers', () => {
     expect(onLate).not.toHaveBeenCalled();
   });
 
+  it('with onLate: a late answer without usable hinglish is not delivered', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let resolve!: (v: unknown) => void;
+    generateContent.mockImplementation(() => new Promise((r) => (resolve = r)));
+    const onLate = vi.fn();
+    await explainMistake({ prev: '-(x-3) = 5', next: '-x-3 = 5' }, DEFAULT_CONFIG, { timeoutMs: 10, lateMs: 1000, onLate });
+    resolve(reply('not json'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onLate).not.toHaveBeenCalled();
+  });
+
   it('a fast answer never calls onLate', async () => {
     generateContent.mockResolvedValue(reply(good));
     const onLate = vi.fn();

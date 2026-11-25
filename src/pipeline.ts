@@ -690,6 +690,9 @@ export class Pipeline {
     ) {
       return; // the line changed meanwhile, or it already has a real explanation
     }
+    // The answer explains this line against `prev`; drop it if the anchor has changed since.
+    const anchor = findPrevAnchor(this.state.lines, current.index);
+    if (anchor?.id !== prev.id || anchor.read?.plain !== prev.read?.plain) return;
     this.updateLine(id, { explanation: late });
     const uid = this.setup?.uid;
     if (!uid) return;

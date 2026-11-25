@@ -403,6 +403,8 @@ export async function explainMistake(
         ms: opts.lateMs ?? EXPLAIN_LATE_MS,
         onText: (t: string) => {
           const e = parseExplanation(t, performance.now() - t0);
+          // Blocked, empty or bad JSON: keep the more specific local fallback.
+          if (e.hinglish === GENERIC_EXPLANATION.hinglish) return;
           warnIfEnglish(e);
           onLate(e);
         },

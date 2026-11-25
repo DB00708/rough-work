@@ -247,6 +247,40 @@ describe('Pipeline routing', () => {
     expect(calls.log).toBe(0);
   });
 
+  it('a late answer is dropped when the anchor line was edited meanwhile (real checker)', async () => {
+    const { checkStep, normalizePlain } = await import('./check');
+    const delivers: ((e: Explanation) => void)[] = [];
+    const { deps, calls } = makeDeps(
+      { a: [r('2*x = 10')], b: [r('x = 4'), r('x = 4')] },
+      {
+        checkStep: vi.fn(checkStep),
+        normalizePlain,
+        explainMistake: vi.fn(async (i, _c, opts) => {
+          delivers.push((e) => opts?.onLate?.(e));
+          return localFallbackExplanation({ prev: i.prev, next: i.next }, 5000);
+        }),
+      },
+    );
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    let s = await run(p, ['a', 'b']);
+    p.editLine(s.lines[0].id, '3*x = 10');
+    await p.whenIdle();
+    s = p.getState();
+    expect(s.lines[1].status).toBe('wrong');
+    expect(delivers).toHaveLength(2);
+    delivers[0]({ ...EXPL, hinglish: 'stale answer for 2*x = 10' }); // first call's late answer
+    await new Promise((res) => setTimeout(res, 0));
+    expect(p.getState().lines[1].explanation?.hinglish).not.toBe('stale answer for 2*x = 10');
+    expect(calls.log).toBe(0);
+    delivers[1](EXPL); // the current call's answer still lands
+    await new Promise((res) => setTimeout(res, 0));
+    await p.whenIdle();
+    expect(p.getState().lines[1].explanation).toEqual(EXPL);
+    expect(calls.log).toBe(1);
+    expect((vi.mocked(deps.logMistake).mock.calls[0][3] as Line).read?.plain).toBe('3*x = 10');
+  });
+
   it('withLineName names the anchor line in the reason', () => {
     expect(withLineName({ verdict: 'not_equivalent', reason: 'previous line gives x = 2' }, 0).reason).toBe('line 1 gives x = 2');
     expect(withLineName({ verdict: 'not_equivalent', reason: 'x=-2 does not satisfy the previous line' }, 1).reason).toBe(
