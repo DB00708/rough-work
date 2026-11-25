@@ -17,7 +17,7 @@ export const realDeps: PipelineDeps = {
   readLineInCloud,
   checkStep,
   normalizePlain,
-  explainMistake: (input, cfg) => explainMistake(input, cfg),
+  explainMistake: (input, cfg, opts) => explainMistake(input, cfg, opts),
   canCallCloud,
   recordCloudCall: (uid) => recordCloudCall(uid),
   startSession,

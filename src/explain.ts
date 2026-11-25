@@ -41,9 +41,17 @@ export type ExplainConfig = AppConfig & { explainWithImages?: boolean };
 export interface ExplainOptions {
   /** Default EXPLAIN_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * When set, a call that misses timeoutMs is not aborted: the caller gets the local
+   * fallback at once, and the real model answer, if it arrives before lateMs, here.
+   */
+  onLate?: (e: Explanation) => void;
+  /** Total wait for a late answer, from the start of the call. Default EXPLAIN_LATE_MS. */
+  lateMs?: number;
 }
 
 export const EXPLAIN_TIMEOUT_MS = 5000;
+export const EXPLAIN_LATE_MS = 20000;
 export const EXPLAIN_MAX_OUTPUT_TOKENS = 320;
 export const ENGLISH_MAX_OUTPUT_TOKENS = 160;
 
@@ -320,12 +328,18 @@ async function generateText(
   parts: Part[],
   cloudModel: string,
   timeoutMs: number,
+  late?: { ms: number; onText: (text: string) => void },
 ): Promise<string | typeof TIMED_OUT> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  let lateTimer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   const timeout = new Promise<typeof TIMED_OUT>((resolve) => {
     timer = setTimeout(() => {
-      controller.abort();
+      timedOut = true;
+      // With a late handler, keep the request alive until late.ms; otherwise stop it now.
+      if (late) lateTimer = setTimeout(() => controller.abort(), Math.max(0, late.ms - timeoutMs));
+      else controller.abort();
       resolve(TIMED_OUT);
     }, timeoutMs);
   });
@@ -344,10 +358,21 @@ async function generateText(
     }
   };
 
+  const pending = call();
+  if (late) {
+    pending.then(
+      (text) => {
+        if (!timedOut || controller.signal.aborted) return;
+        clearTimeout(lateTimer);
+        late.onText(text);
+      },
+      () => clearTimeout(lateTimer),
+    );
+  }
   try {
-    return await Promise.race([call(), timeout]);
+    return await Promise.race([pending, timeout]);
   } catch (err) {
-    if (controller.signal.aborted) return TIMED_OUT;
+    if (controller.signal.aborted || timedOut) return TIMED_OUT;
     throw new ExplainError('network', err instanceof Error ? err.message : 'Explanation request failed', err);
   } finally {
     clearTimeout(timer);
@@ -372,10 +397,23 @@ export async function explainMistake(
   const t0 = performance.now();
   const timeoutMs = opts.timeoutMs ?? EXPLAIN_TIMEOUT_MS;
   const parts = buildParts(input, cfg.explainWithImages === true);
-  const text = await generateText(() => buildModel('explain', cfg), parts, cfg.cloudModel, timeoutMs);
+  const onLate = opts.onLate;
+  const late = onLate
+    ? {
+        ms: opts.lateMs ?? EXPLAIN_LATE_MS,
+        onText: (t: string) => {
+          const e = parseExplanation(t, performance.now() - t0);
+          // Blocked, empty or bad JSON: keep the more specific local fallback.
+          if (e.hinglish === GENERIC_EXPLANATION.hinglish) return;
+          warnIfEnglish(e);
+          onLate(e);
+        },
+      }
+    : undefined;
+  const text = await generateText(() => buildModel('explain', cfg), parts, cfg.cloudModel, timeoutMs, late);
   const ms = performance.now() - t0;
   if (text === TIMED_OUT) {
-    console.warn(`[explain] timed out after ${timeoutMs} ms, using local fallback`);
+    console.warn(`[explain] timed out after ${timeoutMs} ms, using local fallback${late ? '; still waiting for the cloud answer' : ''}`);
     return localFallbackExplanation(input, ms);
   }
   const e = parseExplanation(text, ms);

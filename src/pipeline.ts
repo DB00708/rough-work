@@ -29,7 +29,7 @@ export interface PipelineDeps {
   readLineInCloud(jpegDataUrl: string, cfg: AppConfig): Promise<LineRead>;
   checkStep(prevPlain: string, nextPlain: string): StepCheck;
   normalizePlain(s: string): string;
-  explainMistake(input: ExplainArgs, cfg: AppConfig): Promise<Explanation>;
+  explainMistake(input: ExplainArgs, cfg: AppConfig, opts?: { onLate?: (e: Explanation) => void }): Promise<Explanation>;
   canCallCloud(uid: string, cfg: AppConfig): Promise<boolean>;
   recordCloudCall(uid: string): void | Promise<void>;
   startSession(uid: string, problemText: string): Promise<string>;
@@ -638,16 +638,20 @@ export class Pipeline {
 
     const { cfg, uid } = this.setup!;
     if (!(await this.allowCloud()) || this.stale()) return;
+    const gen = this.gen;
+    const plain = line.read!.plain;
     let explanation: Explanation;
     try {
       explanation = await this.deps.explainMistake(
         {
           prev: prev.read!.plain,
-          next: line.read!.plain,
+          next: plain,
           prevCrop: prev.cropDataUrl || undefined,
           nextCrop: line.cropDataUrl || undefined,
         },
         cfg,
+        // A slow cloud answer replaces the instant local fallback when it arrives.
+        { onLate: (late) => void this.applyLate(id, plain, prev, late, gen) },
       );
       this.recordCloud();
       this.bump('cloud');
@@ -668,6 +672,34 @@ export class Pipeline {
     if (!sid || this.stale()) return;
     try {
       await this.deps.logMistake(uid, sid, textOnly({ ...current, explanation }), textOnly(prev), explanation);
+    } catch (e) {
+      console.warn('[pipeline] logMistake failed', e);
+    }
+  }
+
+  /** The real cloud answer arrived after the timeout: swap out the local fallback and log it. */
+  private async applyLate(id: string, plain: string, prev: Line, late: Explanation, gen: number): Promise<void> {
+    if (this.gen !== gen || this.stopped || isLocalFallback(late)) return;
+    const current = this.find(id);
+    if (
+      !current ||
+      current.status !== 'wrong' ||
+      current.read?.plain !== plain ||
+      !current.explanation ||
+      !isLocalFallback(current.explanation)
+    ) {
+      return; // the line changed meanwhile, or it already has a real explanation
+    }
+    // The answer explains this line against `prev`; drop it if the anchor has changed since.
+    const anchor = findPrevAnchor(this.state.lines, current.index);
+    if (anchor?.id !== prev.id || anchor.read?.plain !== prev.read?.plain) return;
+    this.updateLine(id, { explanation: late });
+    const uid = this.setup?.uid;
+    if (!uid) return;
+    const sid = await this.ensureSession();
+    if (!sid || this.gen !== gen) return;
+    try {
+      await this.deps.logMistake(uid, sid, textOnly({ ...current, explanation: late }), textOnly(prev), late);
     } catch (e) {
       console.warn('[pipeline] logMistake failed', e);
     }
