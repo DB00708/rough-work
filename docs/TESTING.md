@@ -2,7 +2,7 @@
 
 You do not need an account, a key or a password. The app signs you in anonymously.
 
-**Hosted app:** <https://rough-work-81b7f.web.app> (not deployed yet; this line will be updated on deploy).
+**Hosted app:** <https://rough-work-81b7f.web.app>
 
 There are three ways to test, from least to most setup:
 

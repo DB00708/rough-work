@@ -97,7 +97,7 @@ The language model never decides if the maths is right. It reads handwriting on 
 ## What's next
 
 - Measure accuracy on real handwriting from more students and tune the read prompt through Remote Config.
-- Faster cloud explanations (under 5 s).
+- Stream the cloud explanation so the first words show in under 1 s.
 - More topics: calculus steps, inequalities, trigonometric and log identities.
 - A weekly summary of repeated mistake types for the student, a parent or a tutor.
 
