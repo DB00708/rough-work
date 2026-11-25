@@ -64,3 +64,18 @@ Rule learned: automated turns (session notes, scheduled runs) cannot start sessi
 - Security fix: the App Check debug token was inlined into the first production bundle (`const env = import.meta.env` copied every VITE_ var). src/firebase.ts now reads `import.meta.env.X` directly; rebuilt, redeployed, 0 of 9 live JS files contain the token. Old token `local-dev` revoked; new token `local-dev-2` in `.env.local`.
 - Hosted checks: demo mode OK; /spike Nano read correct (cold 18.4 s); production App Check + anonymous auth + cloud Gemini OK (3.0 s); rules allow own session write, deny other-user write and `data:` strings.
 - Left: clean-profile (cloud mode) check, one camera run on hosted that logs a mistake, handwriting 20-photo gate, GitHub repo (user OK), video, submit.
+
+## First end-to-end run on the hosted app (Nov 25 ~10:55)
+Method: Chrome's getUserMedia replaced by a canvas stream of a lined page; 4 lines written one by one in a handwriting-style font (Segoe Print). Everything else is the real hosted app.
+- Line detection on pause: 4/4 lines cropped (1024x87, full width).
+- Nano reads: 4/4 correct, all on device.
+- Checker: lines 1-2 OK; line 3 (sign error) wrong after 2 matching reads.
+- Cloud explanation: Hinglish + English toggle + 3-step hint ladder, correct type (sign moved across =).
+- Firestore: mistake logged; My mistakes + Common mistakes show it.
+- Meter: 6 device reads, 2 cloud calls.
+Issues found → T10 (branch task/T10-e2e-fixes @f265298, in review by t7-reviewer):
+1. Carried error (line 4 follows from wrong line 3) made a 2nd cloud call and a 2nd log.
+2. Reason said "previous line" when it meant line 2.
+3. Explanations started with "Line B mein" (prompt label leaked).
+Cosmetic, not fixed: line thumbnail shows only the middle of the crop.
+Not covered: real handwriting on paper through a real webcam (lighting, blur, hand in frame).
