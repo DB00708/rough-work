@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { COUNTS_DEBOUNCE_MS, LOCAL_QUOTA_ID, Pipeline, findPrevAnchor, hybridRatio, type PipelineDeps } from './pipeline';
+import { COUNTS_DEBOUNCE_MS, LOCAL_QUOTA_ID, Pipeline, findPrevAnchor, hybridRatio, withLineName, type PipelineDeps } from './pipeline';
 import type { AppConfig, Explanation, Line, LineRead, StepCheck } from './types';
 import { localFallbackExplanation } from './explain';
 
@@ -151,6 +151,64 @@ describe('Pipeline routing', () => {
     expect(deps.checkStep).toHaveBeenLastCalledWith('x=2', '2x=2');
   });
 
+  it('a line that follows from the wrong line above is a carried error: red, no cloud, no log', async () => {
+    const { deps, calls } = makeDeps({
+      a: [r('x=2')],
+      b: [r('y=3'), r('y=3')],
+      c: [r('2y=3')],
+      d: [r('3y=3')],
+    });
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    const s = await run(p, ['a', 'b', 'c', 'd']);
+    expect(s.lines.map((l) => l.status)).toEqual(['ok', 'wrong', 'wrong', 'wrong']);
+    expect(s.lines[2].carriedFrom).toBe(1);
+    expect(s.lines[3].carriedFrom).toBe(1); // chain points at the first mistake
+    expect(s.lines[2].check?.reason).toMatch(/line 2/);
+    expect(s.lines[2].explanation).toBeUndefined();
+    expect(calls.explain).toBe(1);
+    expect(calls.log).toBe(1);
+  });
+
+  it('a new mistake after a wrong line is not treated as carried', async () => {
+    const { deps, calls } = makeDeps({ a: [r('x=2')], b: [r('y=3'), r('y=3')], c: [r('z=4'), r('z=4')] });
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    const s = await run(p, ['a', 'b', 'c']);
+    expect(s.lines[2].status).toBe('wrong');
+    expect(s.lines[2].carriedFrom).toBeUndefined();
+    expect(calls.explain).toBe(2);
+  });
+
+  it('editing the original wrong line re-checks every carried line after it (real checker)', async () => {
+    const { checkStep, normalizePlain } = await import('./check');
+    const { deps } = makeDeps(
+      { a: [r('2*x = 10')], b: [r('x = 4'), r('x = 4')], c: [r('x + 1 = 5')], d: [r('x + 2 = 6')] },
+      { checkStep: vi.fn(checkStep), normalizePlain },
+    );
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    let s = await run(p, ['a', 'b', 'c', 'd']);
+    expect(s.lines.map((l) => l.status)).toEqual(['ok', 'wrong', 'wrong', 'wrong']);
+    expect(s.lines.map((l) => l.carriedFrom)).toEqual([undefined, undefined, 1, 1]);
+    p.editLine(s.lines[1].id, 'x = 5');
+    await p.whenIdle();
+    s = p.getState();
+    expect(s.lines[1].status).toBe('ok');
+    expect(s.lines[2].status).toBe('wrong'); // x + 1 = 5 is now its own mistake
+    expect(s.lines[2].carriedFrom).toBeUndefined();
+    expect(s.lines[3].carriedFrom).toBe(2); // follows from line 3's mistake, not the fixed line 2
+    expect(s.lines[3].check?.reason).toMatch(/line 3/);
+  });
+
+  it('withLineName names the anchor line in the reason', () => {
+    expect(withLineName({ verdict: 'not_equivalent', reason: 'previous line gives x = 2' }, 0).reason).toBe('line 1 gives x = 2');
+    expect(withLineName({ verdict: 'not_equivalent', reason: 'x=-2 does not satisfy the previous line' }, 1).reason).toBe(
+      'x=-2 does not satisfy line 2',
+    );
+    expect(withLineName({ verdict: 'equivalent' }, 0)).toEqual({ verdict: 'equivalent' });
+  });
+
   it('respects the daily cap: wrong line stays red with no explain call', async () => {
     const { deps, calls } = makeDeps(
       { a: [r('x=2')], b: [r('x=3')] },
@@ -232,7 +290,8 @@ describe('Pipeline routing', () => {
       const s = p.getState();
       // x=9 is checked against x=2 (the last OK line), not the wrong x=5.
       expect(s.lines.map((l) => l.status)).toEqual(['ok', 'wrong', 'wrong']);
-      expect(deps.checkStep).toHaveBeenLastCalledWith('x=2', 'x=9');
+      expect(deps.checkStep).toHaveBeenCalledWith('x=2', 'x=9');
+      expect(s.lines[2].carriedFrom).toBeUndefined(); // x=9 does not follow from x=5 either
       expect(s.lines[1].explanation).toEqual(EXPL);
       expect(s.lines[2].explanation).toBeUndefined();
       expect(deps.readLine).not.toHaveBeenCalled();

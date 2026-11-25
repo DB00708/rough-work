@@ -67,7 +67,7 @@ export function isExplainError(e: unknown): e is ExplainError {
 /** Output format rules. cfg.explainPrompt (tone, audience) is prepended to this. */
 export const EXPLAIN_PROMPT = `LINE B does not follow from LINE A. Find the one mistake in that step.
 Write ALL text in Roman-script Hinglish: Hindi words in English letters mixed with English maths words. No Devanagari. No pure-English sentences.
-hinglish: 1-3 short, kind sentences. Start with "Line B mein" and name the exact term, sign or rule.
+hinglish: 1-3 short, kind sentences. Start with "Is step mein" and name the exact term, sign or rule. Never write "Line A", "Line B" or "student".
 hints: 3 Hinglish strings: [0] nudge where to look, [1] the rule or method, [2] the corrected LINE B.
 Example hint: "Bracket ke bahar minus hai, andar ke signs dekho."
 mistakeType: best slug, "other" if none fits. Plain-text maths (x^2, sqrt(x)); no LaTeX, no markdown.`;
@@ -196,7 +196,7 @@ export function localFallbackExplanation(input: Pick<ExplainInput, 'prev' | 'nex
     type.slug === 'other'
       ? { ...GENERIC_EXPLANATION, ms: safeMs(ms) }
       : {
-          hinglish: `Line B mein shayad yeh galti hai: ${type.labelHinglish}. ${type.tipHinglish}`,
+          hinglish: `Is step mein shayad yeh galti hai: ${type.labelHinglish}. ${type.tipHinglish}`,
           english: `This step may have a mistake: ${type.label.toLowerCase()}.`,
           hints: [GENERIC_EXPLANATION.hints[0], type.tipHinglish, GENERIC_EXPLANATION.hints[2]],
           mistakeType: type.slug,

@@ -217,7 +217,7 @@ export function LineItem({ line, onEdit }: LineItemProps) {
             explanation={line.explanation}
             lineId={line.id}
           />
-        ) : (
+        ) : line.carriedFrom !== undefined ? null : (
           <p className="explain explain-missing">This step does not follow from the line before. No explanation yet (offline or daily limit).</p>
         ))}
     </li>

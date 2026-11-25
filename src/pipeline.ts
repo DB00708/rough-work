@@ -98,6 +98,28 @@ export function findPrevAnchor(lines: Line[], index: number): Line | undefined {
   return undefined;
 }
 
+/** Name the anchor line in the checker's reason ("the previous line" may not be the line just above). */
+export function withLineName(check: StepCheck, anchorIndex: number): StepCheck {
+  if (!check.reason) return check;
+  return { ...check, reason: check.reason.replace(/(the )?previous line/g, `line ${anchorIndex + 1}`) };
+}
+
+/**
+ * When the line just above is wrong and this line follows from it, the error is
+ * carried over. Returns the 0-based index of the first wrong line in that chain.
+ */
+export function findCarriedOrigin(
+  lines: Line[],
+  index: number,
+  plain: string,
+  check: (prev: string, next: string) => StepCheck,
+): number | undefined {
+  const above = lines[index - 1];
+  if (!above?.read || above.status !== 'wrong') return undefined;
+  if (check(above.read.plain, plain).verdict !== 'equivalent') return undefined;
+  return above.carriedFrom ?? above.index;
+}
+
 /** Lines sent to Firestore never carry an image. */
 const textOnly = (l: Line): Line => ({ ...l, cropDataUrl: '' });
 
@@ -192,6 +214,7 @@ export class Pipeline {
       status: 'checking',
       check: undefined,
       explanation: undefined,
+      carriedFrom: undefined,
     });
     if (!this.queue.some((j) => j.kind === 'crop' && j.id === last.id)) {
       this.enqueue({ kind: 'crop', id: last.id });
@@ -230,6 +253,7 @@ export class Pipeline {
       status: 'checking',
       check: undefined,
       explanation: undefined,
+      carriedFrom: undefined,
     });
     this.enqueue({ kind: 'recheck', id });
     const next = this.state.lines[line.index + 1];
@@ -349,7 +373,7 @@ export class Pipeline {
     void this.run(job)
       .catch((e) => {
         console.warn('[pipeline] job failed', e);
-        if (this.find(job.id)) this.setLine(job.id, { status: 'unsure' });
+        if (this.find(job.id)) this.setLine(job.id, { status: 'unsure', carriedFrom: undefined });
       })
       .finally(() => {
         this.running = false;
@@ -371,12 +395,12 @@ export class Pipeline {
     if (job.kind === 'recheck') {
       const line = this.find(job.id);
       const next = line && this.state.lines[line.index + 1];
+      // A carried line depends on the line above, whatever that line is now.
       if (
-        line?.status === 'ok' &&
-        next &&
-        (next.status === 'wrong' || next.status === 'unsure') &&
-        next.read &&
-        !this.queue.some((j) => j.id === next.id)
+        next?.read &&
+        !this.queue.some((j) => j.id === next.id) &&
+        (next.carriedFrom !== undefined ||
+          (line?.status === 'ok' && (next.status === 'wrong' || next.status === 'unsure')))
       ) {
         this.queue.push({ kind: 'recheck', id: next.id });
       }
@@ -529,18 +553,32 @@ export class Pipeline {
         status: self.verdict === 'unparseable' ? 'unsure' : 'ok',
         check: self.verdict === 'unparseable' ? self : { verdict: 'equivalent', reason: 'first line' },
         explanation: undefined,
+        carriedFrom: undefined,
       });
       return;
     }
 
-    const check = this.safeCheck(prev.read.plain, plain);
+    const check = withLineName(this.safeCheck(prev.read.plain, plain), prev.index);
     if (check.verdict === 'equivalent') {
-      this.setLine(id, { status: 'ok', check, explanation: undefined });
+      this.setLine(id, { status: 'ok', check, explanation: undefined, carriedFrom: undefined });
       return;
     }
     if (check.verdict === 'unparseable') {
       // Rule 4: amber, no cloud call.
-      this.setLine(id, { status: 'unsure', check, explanation: undefined });
+      this.setLine(id, { status: 'unsure', check, explanation: undefined, carriedFrom: undefined });
+      return;
+    }
+
+    // not_equivalent. If it follows from the wrong line just above, the mistake is
+    // already flagged there: say so, with no cloud call and no log.
+    const origin = findCarriedOrigin(this.state.lines, line.index, plain, (a, b) => this.safeCheck(a, b));
+    if (origin !== undefined) {
+      this.setLine(id, {
+        status: 'wrong',
+        check: { verdict: 'not_equivalent', reason: `follows from the mistake in line ${origin + 1}. Fix line ${origin + 1} first.` },
+        explanation: undefined,
+        carriedFrom: origin,
+      });
       return;
     }
 
@@ -559,6 +597,7 @@ export class Pipeline {
           status: 'unsure',
           check: { verdict: 'unparseable', reason: 'two reads disagree; check the transcription' },
           explanation: undefined,
+          carriedFrom: undefined,
         });
         return;
       }
@@ -566,7 +605,7 @@ export class Pipeline {
     }
     if (this.find(id)?.read?.plain !== plain) return; // edited meanwhile; recheck is queued
 
-    this.setLine(id, { status: 'wrong', check, explanation: undefined });
+    this.setLine(id, { status: 'wrong', check, explanation: undefined, carriedFrom: undefined });
     await this.explain(id, prev);
   }
 

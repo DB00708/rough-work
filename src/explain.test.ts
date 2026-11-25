@@ -34,7 +34,7 @@ import {
 import { DEFAULT_CONFIG } from './config';
 
 const good = {
-  hinglish: 'Line B mein bracket kholte waqt -3 ka sign galat ho gaya.',
+  hinglish: 'Is step mein bracket kholte waqt -3 ka sign galat ho gaya.',
   hints: ['Bracket ke andar ka har sign dekho.', '2*(x-3) = 2*x - 2*3 hota hai.', '2*x - 6 = 10'],
   mistakeType: 'sign_error_expanding_brackets',
 };
@@ -137,7 +137,7 @@ describe('local fallback', () => {
   it('builds a taxonomy explanation when the step has a clear signal', () => {
     const e = localFallbackExplanation({ prev: '-(x-3) = 5', next: '-x-3 = 5' }, 5000);
     expect(e.mistakeType).toBe('sign_error_expanding_brackets');
-    expect(e.hinglish).toMatch(/^Line B mein/);
+    expect(e.hinglish).toMatch(/^Is step mein/);
     expect(e.hints[1]).toMatch(/sign badlo/);
     expect(e.english).toBeTruthy();
     expect(isLocalFallback(e)).toBe(true);
