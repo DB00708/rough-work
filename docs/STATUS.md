@@ -79,3 +79,9 @@ Issues found → T10 (branch task/T10-e2e-fixes @f265298, in review by t7-review
 3. Explanations started with "Line B mein" (prompt label leaked).
 Cosmetic, not fixed: line thumbnail shows only the middle of the crop.
 Not covered: real handwriting on paper through a real webcam (lighting, blur, hand in frame).
+
+## T10 merged + hosted re-test (Nov 25 ~11:20)
+- T10 merged @7dbd990 (t7-reviewer APPROVED @fcdebef after 1 round: carried lines re-checked after edits). main: 287 tests.
+- Hosting cache fix: routes like /practice were served with max-age=3600 (the no-cache rule only matched /index.html), so returning users kept the old app for an hour. firebase.json now sets no-cache on `{/index.html,**/!(*.*)}`; assets stay immutable. Verified live.
+- Hosted E2E re-run: lines 1-2 OK, line 3 wrong + Hinglish ("Is step mein ..."), reason "does not satisfy line 2", line 4 "follows from the mistake in line 3" with no cloud call (1 cloud call total). Fixing line 3 by hand → OK, line 4 re-checked as its own mistake.
+- Handover PDF for the user: handover/Rough-Work-Handover.pdf (git-ignored).
