@@ -6,7 +6,7 @@ Paste each section into the matching Devpost field. Lines marked **VERIFY BEFORE
 
 - **Platform:** Web (Chrome)
 - **Hosted app:** https://rough-work-81b7f.web.app (deployed Nov 25. VERIFY BEFORE SUBMIT: open it in a clean Chrome profile without Nano, expect the cloud mode badge)
-- **Repository:** <GitHub repo URL> (public, Apache 2.0 visible in the About section)
+- **Repository:** https://github.com/DB00708/rough-work (public, Apache 2.0)
 - **Demo video:** <YouTube URL> (public, under 3:00, English subtitles)
 - **Testing instructions:** paste from [docs/TESTING.md](TESTING.md), or link to it in the repo.
 
