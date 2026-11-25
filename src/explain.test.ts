@@ -335,6 +335,56 @@ describe('explainMistake', () => {
   });
 });
 
+describe('explainMistake late answers', () => {
+  beforeEach(() => {
+    generateContent.mockReset();
+  });
+
+  it('with onLate: returns the fallback at the timeout, then delivers the real answer', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let resolve!: (v: unknown) => void;
+    let signal: AbortSignal | undefined;
+    generateContent.mockImplementation((_p: unknown, opts?: { signal: AbortSignal }) => {
+      signal = opts?.signal;
+      return new Promise((r) => (resolve = r));
+    });
+    const onLate = vi.fn();
+    const e = await explainMistake({ prev: '-(x-3) = 5', next: '-x-3 = 5' }, DEFAULT_CONFIG, { timeoutMs: 20, lateMs: 1000, onLate });
+    expect(isLocalFallback(e)).toBe(true);
+    expect(signal?.aborted).toBe(false); // still waiting
+    resolve(reply(good));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onLate).toHaveBeenCalledTimes(1);
+    const late = onLate.mock.calls[0][0];
+    expect(isLocalFallback(late)).toBe(false);
+    expect(late.hinglish).toBe(good.hinglish);
+  });
+
+  it('with onLate: aborts after lateMs and never calls onLate', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let signal: AbortSignal | undefined;
+    generateContent.mockImplementation((_p: unknown, opts?: { signal: AbortSignal }) => {
+      signal = opts?.signal;
+      return new Promise((_r, rej) => opts?.signal.addEventListener('abort', () => rej(new Error('aborted'))));
+    });
+    const onLate = vi.fn();
+    const e = await explainMistake({ prev: '-(x-3) = 5', next: '-x-3 = 5' }, DEFAULT_CONFIG, { timeoutMs: 10, lateMs: 40, onLate });
+    expect(isLocalFallback(e)).toBe(true);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(signal?.aborted).toBe(true);
+    expect(onLate).not.toHaveBeenCalled();
+  });
+
+  it('a fast answer never calls onLate', async () => {
+    generateContent.mockResolvedValue(reply(good));
+    const onLate = vi.fn();
+    const e = await explainMistake({ prev: 'a', next: 'b' }, DEFAULT_CONFIG, { timeoutMs: 1000, onLate });
+    expect(isLocalFallback(e)).toBe(false);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onLate).not.toHaveBeenCalled();
+  });
+});
+
 describe('explainInEnglish', () => {
   beforeEach(() => {
     generateContent.mockReset();
