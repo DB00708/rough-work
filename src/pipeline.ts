@@ -98,6 +98,28 @@ export function findPrevAnchor(lines: Line[], index: number): Line | undefined {
   return undefined;
 }
 
+/** Name the anchor line in the checker's reason ("the previous line" may not be the line just above). */
+export function withLineName(check: StepCheck, anchorIndex: number): StepCheck {
+  if (!check.reason) return check;
+  return { ...check, reason: check.reason.replace(/the previous line/g, `line ${anchorIndex + 1}`) };
+}
+
+/**
+ * When the line just above is wrong and this line follows from it, the error is
+ * carried over. Returns the 0-based index of the first wrong line in that chain.
+ */
+export function findCarriedOrigin(
+  lines: Line[],
+  index: number,
+  plain: string,
+  check: (prev: string, next: string) => StepCheck,
+): number | undefined {
+  const above = lines[index - 1];
+  if (!above?.read || above.status !== 'wrong') return undefined;
+  if (check(above.read.plain, plain).verdict !== 'equivalent') return undefined;
+  return above.carriedFrom ?? above.index;
+}
+
 /** Lines sent to Firestore never carry an image. */
 const textOnly = (l: Line): Line => ({ ...l, cropDataUrl: '' });
 
@@ -533,14 +555,27 @@ export class Pipeline {
       return;
     }
 
-    const check = this.safeCheck(prev.read.plain, plain);
+    const check = withLineName(this.safeCheck(prev.read.plain, plain), prev.index);
     if (check.verdict === 'equivalent') {
-      this.setLine(id, { status: 'ok', check, explanation: undefined });
+      this.setLine(id, { status: 'ok', check, explanation: undefined, carriedFrom: undefined });
       return;
     }
     if (check.verdict === 'unparseable') {
       // Rule 4: amber, no cloud call.
-      this.setLine(id, { status: 'unsure', check, explanation: undefined });
+      this.setLine(id, { status: 'unsure', check, explanation: undefined, carriedFrom: undefined });
+      return;
+    }
+
+    // not_equivalent. If it follows from the wrong line just above, the mistake is
+    // already flagged there: say so, with no cloud call and no log.
+    const origin = findCarriedOrigin(this.state.lines, line.index, plain, (a, b) => this.safeCheck(a, b));
+    if (origin !== undefined) {
+      this.setLine(id, {
+        status: 'wrong',
+        check: { verdict: 'not_equivalent', reason: `follows from the mistake in line ${origin + 1}. Fix line ${origin + 1} first.` },
+        explanation: undefined,
+        carriedFrom: origin,
+      });
       return;
     }
 
@@ -566,7 +601,7 @@ export class Pipeline {
     }
     if (this.find(id)?.read?.plain !== plain) return; // edited meanwhile; recheck is queued
 
-    this.setLine(id, { status: 'wrong', check, explanation: undefined });
+    this.setLine(id, { status: 'wrong', check, explanation: undefined, carriedFrom: undefined });
     await this.explain(id, prev);
   }
 

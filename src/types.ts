@@ -56,6 +56,8 @@ export interface Line {
   status: LineStatus;
   check?: StepCheck;
   explanation?: Explanation;
+  /** Set when this line follows from an earlier wrong line (0-based index of that line). No cloud call, no log. */
+  carriedFrom?: number;
 }
 
 /** Remote Config values (with local defaults). */
