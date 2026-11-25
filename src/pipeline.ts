@@ -101,7 +101,7 @@ export function findPrevAnchor(lines: Line[], index: number): Line | undefined {
 /** Name the anchor line in the checker's reason ("the previous line" may not be the line just above). */
 export function withLineName(check: StepCheck, anchorIndex: number): StepCheck {
   if (!check.reason) return check;
-  return { ...check, reason: check.reason.replace(/the previous line/g, `line ${anchorIndex + 1}`) };
+  return { ...check, reason: check.reason.replace(/(the )?previous line/g, `line ${anchorIndex + 1}`) };
 }
 
 /**
@@ -214,6 +214,7 @@ export class Pipeline {
       status: 'checking',
       check: undefined,
       explanation: undefined,
+      carriedFrom: undefined,
     });
     if (!this.queue.some((j) => j.kind === 'crop' && j.id === last.id)) {
       this.enqueue({ kind: 'crop', id: last.id });
@@ -252,6 +253,7 @@ export class Pipeline {
       status: 'checking',
       check: undefined,
       explanation: undefined,
+      carriedFrom: undefined,
     });
     this.enqueue({ kind: 'recheck', id });
     const next = this.state.lines[line.index + 1];
@@ -371,7 +373,7 @@ export class Pipeline {
     void this.run(job)
       .catch((e) => {
         console.warn('[pipeline] job failed', e);
-        if (this.find(job.id)) this.setLine(job.id, { status: 'unsure' });
+        if (this.find(job.id)) this.setLine(job.id, { status: 'unsure', carriedFrom: undefined });
       })
       .finally(() => {
         this.running = false;
@@ -393,12 +395,12 @@ export class Pipeline {
     if (job.kind === 'recheck') {
       const line = this.find(job.id);
       const next = line && this.state.lines[line.index + 1];
+      // A carried line depends on the line above, whatever that line is now.
       if (
-        line?.status === 'ok' &&
-        next &&
-        (next.status === 'wrong' || next.status === 'unsure') &&
-        next.read &&
-        !this.queue.some((j) => j.id === next.id)
+        next?.read &&
+        !this.queue.some((j) => j.id === next.id) &&
+        (next.carriedFrom !== undefined ||
+          (line?.status === 'ok' && (next.status === 'wrong' || next.status === 'unsure')))
       ) {
         this.queue.push({ kind: 'recheck', id: next.id });
       }
@@ -551,6 +553,7 @@ export class Pipeline {
         status: self.verdict === 'unparseable' ? 'unsure' : 'ok',
         check: self.verdict === 'unparseable' ? self : { verdict: 'equivalent', reason: 'first line' },
         explanation: undefined,
+        carriedFrom: undefined,
       });
       return;
     }
@@ -594,6 +597,7 @@ export class Pipeline {
           status: 'unsure',
           check: { verdict: 'unparseable', reason: 'two reads disagree; check the transcription' },
           explanation: undefined,
+          carriedFrom: undefined,
         });
         return;
       }

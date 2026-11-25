@@ -180,7 +180,29 @@ describe('Pipeline routing', () => {
     expect(calls.explain).toBe(2);
   });
 
+  it('editing the original wrong line re-checks every carried line after it (real checker)', async () => {
+    const { checkStep, normalizePlain } = await import('./check');
+    const { deps } = makeDeps(
+      { a: [r('2*x = 10')], b: [r('x = 4'), r('x = 4')], c: [r('x + 1 = 5')], d: [r('x + 2 = 6')] },
+      { checkStep: vi.fn(checkStep), normalizePlain },
+    );
+    const p = new Pipeline(deps);
+    p.init({ cfg, uid: 'u', cloudMode: false });
+    let s = await run(p, ['a', 'b', 'c', 'd']);
+    expect(s.lines.map((l) => l.status)).toEqual(['ok', 'wrong', 'wrong', 'wrong']);
+    expect(s.lines.map((l) => l.carriedFrom)).toEqual([undefined, undefined, 1, 1]);
+    p.editLine(s.lines[1].id, 'x = 5');
+    await p.whenIdle();
+    s = p.getState();
+    expect(s.lines[1].status).toBe('ok');
+    expect(s.lines[2].status).toBe('wrong'); // x + 1 = 5 is now its own mistake
+    expect(s.lines[2].carriedFrom).toBeUndefined();
+    expect(s.lines[3].carriedFrom).toBe(2); // follows from line 3's mistake, not the fixed line 2
+    expect(s.lines[3].check?.reason).toMatch(/line 3/);
+  });
+
   it('withLineName names the anchor line in the reason', () => {
+    expect(withLineName({ verdict: 'not_equivalent', reason: 'previous line gives x = 2' }, 0).reason).toBe('line 1 gives x = 2');
     expect(withLineName({ verdict: 'not_equivalent', reason: 'x=-2 does not satisfy the previous line' }, 1).reason).toBe(
       'x=-2 does not satisfy line 2',
     );
